@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visor de Documentos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+</script>
+<style>
+  :root {
+    --navy-950: #0a0e1a;
+    --navy-900: #0f1524;
+    --navy-800: #161d30;
+    --navy-700: #1f2740;
+    --navy-600: #2a3352;
+    --gold: #c9a24b;
+    --gold-bright: #e0be6f;
+    --teal: #3a8f92;
+    --ink-100: #eef1f8;
+    --ink-400: #8b92a8;
+    --ink-600: #5b6280;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body {
+    height: 100%;
+    background: var(--navy-950);
+    color: var(--ink-100);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    height: 56px;
+    background: linear-gradient(180deg, var(--navy-900), var(--navy-950));
+    border-bottom: 1px solid var(--navy-700);
+    flex-shrink: 0;
+    z-index: 20;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gold-bright);
+    font-weight: 600;
+    margin-right: 8px;
+  }
+
+  .brand-mark {
+    width: 22px;
+    height: 22px;
+    border: 1.5px solid var(--gold);
+    border-radius: 3px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .brand-mark::before,
+  .brand-mark::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 1.5px;
+    background: var(--gold);
+  }
+
+  .brand-mark::before {
+    top: 7px;
+  }
+
+  .brand-mark::after {
+    top: 12px;
+    width: 60%;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .divider {
+    width: 1px;
+    height: 24px;
+    background: var(--navy-700);
+    margin: 0 6px;
+    flex-shrink: 0;
+  }
+
+  button.tool {
+    background: var(--navy-800);
+    border: 1px solid var(--navy-600);
+    color: var(--ink-100);
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: .15s ease;
+    font-size: 15px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  button.tool:hover:not(:disabled) {
+    border-color: var(--gold);
+    color: var(--gold-bright);
+  }
+
+  button.tool:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+  }
+
+  button.tool svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+  }
+
+  button.tool.active {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: var(--navy-950);
+  }
+
+  button.tool.active svg {
+    stroke: var(--navy-950);
+  }
+
+  button.tool .dot {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--teal);
+    border: 1.5px solid var(--navy-950);
+    display: none;
+  }
+
+  button.tool .dot.show {
+    display: block;
+  }
+
+  .page-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--ink-400);
+    background: var(--navy-800);
+    border: 1px solid var(--navy-600);
+    border-radius: 6px;
+    padding: 0 4px;
+    height: 34px;
+  }
+
+  .page-indicator input {
+    width: 42px;
+    background: transparent;
+    border: none;
+    color: var(--ink-100);
+    text-align: center;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .zoom-label {
+    font-size: 12px;
+    color: var(--ink-400);
+    min-width: 44px;
+    text-align: center;
+  }
+
+  .upload-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--gold);
+    color: var(--navy-950);
+    border: none;
+    padding: 0 16px;
+    height: 36px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .15s;
+    letter-spacing: .02em;
+    flex-shrink: 0;
+  }
+
+  .upload-btn:hover {
+    background: var(--gold-bright);
+  }
+
+  .upload-btn svg {
+    width: 15px;
+    height: 15px;
+    stroke: var(--navy-950);
+    fill: none;
+    stroke-width: 2;
+  }
+
+  .filename {
+    font-size: 12.5px;
+    color: var(--ink-400);
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-left: 6px;
+  }
+
+  .header-spacer {
+    margin-left: auto;
+  }
+
+  /* ---------- Search bar (row 2) ---------- */
+  .search-bar {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--navy-900);
+    border-bottom: 1px solid var(--navy-700);
+    flex-shrink: 0;
+  }
+
+  .search-bar.active {
+    display: flex;
+  }
+
+  .search-bar input {
+    flex: 1;
+    max-width: 360px;
+    background: var(--navy-800);
+    border: 1px solid var(--navy-600);
+    color: var(--ink-100);
+    border-radius: 6px;
+    padding: 0 12px;
+    height: 32px;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .search-bar input:focus {
+    border-color: var(--teal);
+  }
+
+  .search-count {
+    font-size: 12px;
+    color: var(--ink-400);
+    min-width: 60px;
+  }
+
+  .search-bar .close-search {
+    margin-left: auto;
+  }
+
+  /* ---------- Body layout ---------- */
+  .main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    position: relative;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 170px;
+    background: var(--navy-900);
+    border-right: 1px solid var(--navy-700);
+    overflow-y: auto;
+    padding: 0 12px 14px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar.hidden {
+    display: none;
+  }
+
+  .thumbs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 14px;
+  }
+
+  .thumb {
+    cursor: pointer;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 2px solid transparent;
+    position: relative;
+    background: var(--navy-800);
+    transition: .15s;
+  }
+
+  .thumb:hover {
+    border-color: var(--teal);
+  }
+
+  .thumb.active {
+    border-color: var(--gold);
+  }
+
+  .thumb canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .thumb .num {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background: rgba(10, 14, 26, .85);
+    color: var(--gold-bright);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-top-left-radius: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .thumb .bm {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: var(--gold);
+    color: var(--navy-950);
+    font-size: 9px;
+    padding: 1px 5px 2px;
+    border-bottom-right-radius: 4px;
+  }
+
+  /* Generic side panel (folder list / bookmarks / recent) */
+  .panel {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 0 14px;
+    border-bottom: 1px solid var(--navy-700);
+    flex-shrink: 0;
+  }
+
+  .panel.active {
+    display: flex;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .panel-title {
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-600);
+    font-weight: 600;
+  }
+
+  .panel-count {
+    font-size: 10.5px;
+    color: var(--ink-600);
+  }
+
+  .panel-filter {
+    background: var(--navy-800);
+    border: 1px solid var(--navy-600);
+    color: var(--ink-100);
+    border-radius: 5px;
+    padding: 0 8px;
+    height: 26px;
+    font-size: 11.5px;
+    outline: none;
+  }
+
+  .panel-filter:focus {
+    border-color: var(--teal);
+  }
+
+  .panel-items {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .list-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--ink-400);
+    border: 1px solid transparent;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: .12s;
+  }
+
+  .list-item:hover {
+    background: var(--navy-800);
+    color: var(--ink-100);
+  }
+
+  .list-item.active {
+    background: var(--navy-800);
+    border-color: var(--gold);
+    color: var(--gold-bright);
+  }
+
+  .list-item svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+  }
+
+  .doc-nav {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  /* ---------- Viewer ---------- */
+  .viewer-wrap {
+    flex: 1;
+    overflow: auto;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(58, 143, 146, .06), transparent 60%),
+      var(--navy-950);
+    position: relative;
+  }
+
+  /* Inner container that actually holds the pages. Keeping the flex layout
+     here (instead of on the scroll container) lets the pages grow past the
+     viewport when zoomed, so BOTH scrollbars appear and no edge gets clipped
+     by centering — the classic "flex + overflow hides the left side" bug. */
+  .pages-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 32px 24px 60px;
+    min-width: min-content;
+    min-height: 100%;
+    box-sizing: border-box;
+  }
+
+  .page-slot {
+    position: relative;
+    height: fit-content;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .55), 0 0 0 1px var(--navy-700);
+    border-radius: 2px;
+    background: #fff;
+    flex-shrink: 0;
+  }
+
+  .page-slot.hidden {
+    display: none;
+  }
+
+  .page-slot canvas.base {
+    display: block;
+  }
+
+  .page-slot canvas.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+  }
+
+  .page-slot.annot-mode canvas.overlay {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+
+  .page-slot.zoom-mode canvas.overlay {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+
+  /* Empty state */
+  .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    color: var(--ink-600);
+    text-align: center;
+    padding: 40px;
+  }
+
+  .empty.hidden {
+    display: none;
+  }
+
+  .drop-icon {
+    width: 64px;
+    height: 64px;
+    border: 1.5px dashed var(--navy-600);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .drop-icon svg {
+    width: 26px;
+    height: 26px;
+    stroke: var(--ink-600);
+    fill: none;
+    stroke-width: 1.6;
+  }
+
+  .empty h2 {
+    color: var(--ink-400);
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: .02em;
+  }
+
+  .empty p {
+    font-size: 13px;
+    max-width: 280px;
+    line-height: 1.5;
+  }
+
+  .empty .browse {
+    color: var(--gold);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .dragover {
+    outline: 2px dashed var(--gold);
+    outline-offset: -8px;
+    background: rgba(201, 162, 75, .04);
+  }
+
+  #fileInput,
+  #folderInput {
+    display: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--navy-950);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--navy-700);
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--navy-600);
+  }
+
+  .loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 14, 26, .75);
+    z-index: 10;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .loading.hidden {
+    display: none;
+  }
+
+  .spinner {
+    width: 34px;
+    height: 34px;
+    border: 2.5px solid var(--navy-700);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+
+  .loading span {
+    font-size: 12.5px;
+    color: var(--ink-400);
+    letter-spacing: .03em;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Note popover */
+  .note-panel {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 260px;
+    background: var(--navy-800);
+    border: 1px solid var(--navy-600);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    padding: 12px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 15;
+  }
+
+  .note-panel.active {
+    display: flex;
+  }
+
+  .note-panel-title {
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gold-bright);
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .note-panel-title button {
+    background: none;
+    border: none;
+    color: var(--ink-600);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .note-panel textarea {
+    width: 100%;
+    min-height: 100px;
+    background: var(--navy-900);
+    border: 1px solid var(--navy-600);
+    color: var(--ink-100);
+    border-radius: 5px;
+    padding: 8px;
+    font-size: 12.5px;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+  }
+
+  .note-panel textarea:focus {
+    border-color: var(--teal);
+  }
+
+  /* Zoom selection overlay */
+  .zoom-selection {
+    position: absolute;
+    border: 2px solid var(--gold);
+    background: rgba(201, 162, 75, 0.2);
+    pointer-events: none;
+    display: none;
+    z-index: 5;
+    border-radius: 2px;
+  }
+
+  .zoom-mode-hint {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 14, 26, 0.85);
+    color: var(--gold-bright);
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    border: 1px solid var(--gold);
+    display: none;
+    z-index: 6;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .zoom-mode-hint.active {
+    display: block;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark"></div>Visor
+    </div>
+
+    <div class="toolbar">
+      <button class="tool" id="toggleSidebar" title="Panel lateral">
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="4" width="7" height="16" rx="1" />
+          <rect x="14" y="4" width="7" height="6" rx="1" />
+          <rect x="14" y="13" width="7" height="7" rx="1" />
+        </svg>
+      </button>
+      <div class="divider"></div>
+      <button class="tool" id="prevPage" title="Página anterior">
+        <svg viewBox="0 0 24 24">
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+      </button>
+      <div class="page-indicator">
+        <input type="number" id="pageInput" min="1" value="1">
+        <span id="pageCount" style="color:var(--ink-600);">/ 0</span>
+      </div>
+      <button class="tool" id="nextPage" title="Página siguiente">
+        <svg viewBox="0 0 24 24">
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+      </button>
+      <div class="divider"></div>
+      <button class="tool" id="zoomOut" title="Alejar">
+        <svg viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.35-4.35M8 11h6" />
+        </svg>
+      </button>
+      <span class="zoom-label" id="zoomLabel">100%</span>
+      <button class="tool" id="zoomIn" title="Acercar">
+        <svg viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.35-4.35M11 8v6M8 11h6" />
+        </svg>
+      </button>
+      <button class="tool" id="fitWidth" title="Ajustar al ancho">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" />
+        </svg>
+      </button>
+      <div class="divider"></div>
+      <button class="tool" id="rotateBtn" title="Rotar página">
+        <svg viewBox="0 0 24 24">
+          <path d="M21 12a9 9 0 11-3.5-7.1M21 4v5h-5" />
+        </svg>
+      </button>
+      <button class="tool" id="spreadBtn" title="Vista de dos páginas">
+        <svg viewBox="0 0 24 24">
+          <rect x="2" y="4" width="9" height="16" rx="1" />
+          <rect x="13" y="4" width="9" height="16" rx="1" />
+        </svg>
+      </button>
+      <button class="tool" id="fullscreenBtn" title="Pantalla completa">
+        <svg viewBox="0 0 24 24">
+          <path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3" />
+        </svg>
+      </button>
+      <div class="divider"></div>
+      <button class="tool" id="highlightBtn" title="Resaltar">
+        <svg viewBox="0 0 24 24">
+          <path d="M9 11l6-6 4 4-6 6H9v-4z" />
+          <path d="M5 21l3-3" />
+        </svg>
+      </button>
+      <button class="tool" id="clearHighlightBtn" title="Borrar resaltados de esta página">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15" />
+        </svg>
+      </button>
+      <button class="tool" id="zoomAreaBtn" title="Zoom por área">
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="12" cy="12" r="4" />
+        </svg>
+      </button>
+      <button class="tool" id="noteBtn" title="Nota de esta página">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 4h16v12H8l-4 4V4z" />
+        </svg>
+        <span class="dot" id="noteDot"></span>
+      </button>
+      <button class="tool" id="bookmarkBtn" title="Marcar esta página">
+        <svg viewBox="0 0 24 24">
+          <path d="M6 3h12v18l-6-4-6 4V3z" />
+        </svg>
+      </button>
+      <div class="divider"></div>
+      <button class="tool" id="searchBtn" title="Buscar texto">
+        <svg viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.35-4.35" />
+        </svg>
+      </button>
+      <button class="tool" id="downloadBtn" title="Descargar" disabled>
+        <svg viewBox="0 0 24 24">
+          <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+        </svg>
+      </button>
+      <div class="doc-nav" id="docNav" style="display:none;">
+        <button class="tool" id="prevDoc" title="PDF anterior en la carpeta">
+          <svg viewBox="0 0 24 24">
+            <path d="M17 18l-6-6 6-6M8 6v12" />
+          </svg>
+        </button>
+        <button class="tool" id="nextDoc" title="PDF siguiente en la carpeta">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 18l6-6-6-6M16 6v12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <span class="filename" id="filenameLabel"></span>
+
+    <div class="header-spacer"></div>
+
+    <label class="upload-btn" for="fileInput" style="background:var(--gold);">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 3v12M7 8l5-5 5 5M5 21h14" />
+      </svg>
+      Abrir PDF
+    </label>
+    <input type="file" id="fileInput" accept="application/pdf">
+
+    <label class="upload-btn" for="folderInput" style="background:var(--navy-800);color:var(--gold-bright);border:1px solid var(--navy-600);">
+      <svg viewBox="0 0 24 24" style="stroke:var(--gold-bright);">
+        <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+      </svg>
+      Abrir carpeta
+    </label>
+    <input type="file" id="folderInput" webkitdirectory directory multiple>
+  </header>
+
+  <div class="search-bar" id="searchBar">
+    <input type="text" id="searchInput" placeholder="Buscar texto en el documento…">
+    <span class="search-count" id="searchCount"></span>
+    <button class="tool" id="searchPrev" title="Anterior">
+      <svg viewBox="0 0 24 24">
+        <path d="M18 15l-6-6-6 6" />
+      </svg>
+    </button>
+    <button class="tool" id="searchNext" title="Siguiente">
+      <svg viewBox="0 0 24 24">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>
+    <button class="tool close-search" id="closeSearch" title="Cerrar">
+      <svg viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="main" id="dropZone">
+
+    <div class="sidebar hidden" id="sidebar">
+      <div class="panel" id="doclist">
+        <div class="panel-header">
+          <span class="panel-title">Carpeta</span>
+          <span class="panel-count" id="doclistCount"></span>
+        </div>
+        <input type="text" class="panel-filter" id="doclistFilter" placeholder="Filtrar archivos…">
+        <div class="panel-items" id="doclistItems"></div>
+      </div>
+
+      <div class="panel" id="bookmarksPanel">
+        <div class="panel-header">
+          <span class="panel-title">Marcadores</span>
+          <span class="panel-count" id="bookmarksCount"></span>
+        </div>
+        <div class="panel-items" id="bookmarksItems"></div>
+      </div>
+
+      <div class="panel" id="recentPanel">
+        <div class="panel-header">
+          <span class="panel-title">Recientes</span>
+          <span class="panel-count" id="recentCount"></span>
+        </div>
+        <div class="panel-items" id="recentItems"></div>
+      </div>
+
+      <div class="thumbs-list" id="thumbsContainer"></div>
+    </div>
+
+    <div class="viewer-wrap" id="viewerWrap">
+      <!-- Zoom selection overlay -->
+      <div class="zoom-selection" id="zoomSelection"></div>
+      <div class="zoom-mode-hint" id="zoomHint">🔍 Arrastra para seleccionar el área a ampliar</div>
+
+      <div class="pages-container" id="pagesContainer">
+        <div class="page-slot" id="slotA">
+          <canvas class="base" id="pageCanvas"></canvas>
+          <canvas class="overlay" id="annotCanvas"></canvas>
+        </div>
+        <div class="page-slot hidden" id="slotB">
+          <canvas class="base" id="pageCanvas2"></canvas>
+          <canvas class="overlay" id="annotCanvas2"></canvas>
+        </div>
+      </div>
+
+      <div class="note-panel" id="notePanel">
+        <div class="note-panel-title">
+          <span>Nota — página <span id="notePageLabel">1</span></span>
+          <button id="closeNote">×</button>
+        </div>
+        <textarea id="noteTextarea" placeholder="Escribe una nota para esta página…"></textarea>
+      </div>
+    </div>
+
+    <div class="empty" id="emptyState">
+      <div class="drop-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 3v12M7 8l5-5 5 5M5 21h14" />
+        </svg>
+      </div>
+      <h2>Sin documento cargado</h2>
+      <p>Arrastra un archivo PDF aquí, o <span class="browse" id="browseLink">selecciona un archivo</span> desde tu equipo.</p>
+    </div>
+
+    <div class="loading hidden" id="loadingState">
+      <div class="spinner"></div>
+      <span id="loadingLabel">Cargando documento…</span>
+    </div>
+
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    // ---------- DOM refs ----------
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const emptyState = document.getElementById('emptyState');
+    const loadingState = document.getElementById('loadingState');
+    const loadingLabel = document.getElementById('loadingLabel');
+    const viewerWrap = document.getElementById('viewerWrap');
+    const pageCanvas = document.getElementById('pageCanvas');
+    const annotCanvas = document.getElementById('annotCanvas');
+    const pageCanvas2 = document.getElementById('pageCanvas2');
+    const annotCanvas2 = document.getElementById('annotCanvas2');
+    const slotA = document.getElementById('slotA');
+    const slotB = document.getElementById('slotB');
+    const sidebar = document.getElementById('sidebar');
+    const pageInput = document.getElementById('pageInput');
+    const pageCount = document.getElementById('pageCount');
+    const zoomLabel = document.getElementById('zoomLabel');
+    const filenameLabel = document.getElementById('filenameLabel');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const browseLink = document.getElementById('browseLink');
+    const folderInput = document.getElementById('folderInput');
+    const thumbsContainer = document.getElementById('thumbsContainer');
+    const doclist = document.getElementById('doclist');
+    const doclistItems = document.getElementById('doclistItems');
+    const doclistCount = document.getElementById('doclistCount');
+    const doclistFilter = document.getElementById('doclistFilter');
+    const docNav = document.getElementById('docNav');
+    const prevDocBtn = document.getElementById('prevDoc');
+    const nextDocBtn = document.getElementById('nextDoc');
+
+    const rotateBtn = document.getElementById('rotateBtn');
+    const spreadBtn = document.getElementById('spreadBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const highlightBtn = document.getElementById('highlightBtn');
+    const clearHighlightBtn = document.getElementById('clearHighlightBtn');
+    const zoomAreaBtn = document.getElementById('zoomAreaBtn');
+    const noteBtn = document.getElementById('noteBtn');
+    const noteDot = document.getElementById('noteDot');
+    const bookmarkBtn = document.getElementById('bookmarkBtn');
+    const notePanel = document.getElementById('notePanel');
+    const noteTextarea = document.getElementById('noteTextarea');
+    const notePageLabel = document.getElementById('notePageLabel');
+    const closeNote = document.getElementById('closeNote');
+
+    const bookmarksPanel = document.getElementById('bookmarksPanel');
+    const bookmarksItems = document.getElementById('bookmarksItems');
+    const bookmarksCount = document.getElementById('bookmarksCount');
+    const recentPanel = document.getElementById('recentPanel');
+    const recentItems = document.getElementById('recentItems');
+    const recentCount = document.getElementById('recentCount');
+
+    const searchBtn = document.getElementById('searchBtn');
+    const searchBar = document.getElementById('searchBar');
+    const searchInput = document.getElementById('searchInput');
+    const searchCount = document.getElementById('searchCount');
+    const searchPrev = document.getElementById('searchPrev');
+    const searchNext = document.getElementById('searchNext');
+    const closeSearch = document.getElementById('closeSearch');
+
+    // Zoom selection overlay
+    const zoomSelection = document.getElementById('zoomSelection');
+    const zoomHint = document.getElementById('zoomHint');
+
+    // ---------- State ----------
+    let pdfDoc = null;
+    let currentPage = 1;
+    let scale = 1.35;
+    let currentFileName = '';
+    let currentFileURL = null;
+
+    let folderFiles = [];
+    let currentDocIndex = -1;
+
+    let recentFiles = []; // [{name, file}]
+
+    let rotationMap = {}; // filename -> degrees
+    let highlightMap = {}; // filename -> {page: [{x0,y0,x1,y1}]}
+    let noteMap = {}; // filename -> {page: text}
+    let bookmarkMap = {}; // filename -> Set(page)
+    let textCache = {}; // filename -> {page: textContent}
+
+    let spreadMode = false;
+    let annotMode = false;
+    let zoomMode = false; // Zoom by area mode
+    let isDrawing = false;
+    let drawStart = null;
+    let drawTargetCanvas = null;
+    let drawTargetPage = null;
+
+    let matchesByPage = {}; // {page: [{x0,y0,x1,y1}]}
+    let flatMatches = []; // [{page, rect}]
+    let searchIndex = -1;
+
+    // ---------- Zoom selection state ----------
+    let isZoomSelecting = false;
+    let zoomStart = null;
+
+    // ---------- Helpers ----------
+    function getRotation() { return rotationMap[currentFileName] || 0; }
+
+    function ensureDocMaps(name) {
+      if (!highlightMap[name]) highlightMap[name] = {};
+      if (!noteMap[name]) noteMap[name] = {};
+      if (!bookmarkMap[name]) bookmarkMap[name] = new Set();
+      if (!textCache[name]) textCache[name] = {};
+    }
+
+    function showEmpty(show) {
+      emptyState.classList.toggle('hidden', !show);
+      viewerWrap.style.display = show ? 'none' : 'block';
+    }
+
+    function showLoading(show, label) {
+      if (label) loadingLabel.textContent = label;
+      loadingState.classList.toggle('hidden', !show);
+    }
+
+    // ---------- Load a PDF ----------
+    async function loadPDF(file) {
+      showLoading(true, 'Cargando documento…');
+      showEmpty(false);
+      closeNotePanel();
+      matchesByPage = {};
+      flatMatches = [];
+      searchIndex = -1;
+      updateSearchCount();
+      // Exit zoom mode when loading a new document
+      exitZoomMode();
+
+      currentFileName = file.name;
+      filenameLabel.textContent = file.name;
+      filenameLabel.title = file.name;
+      ensureDocMaps(currentFileName);
+
+      const arrayBuffer = await file.arrayBuffer();
+      currentFileURL = URL.createObjectURL(new Blob([arrayBuffer], { type: 'application/pdf' }));
+      downloadBtn.disabled = false;
+
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      pdfDoc = await loadingTask.promise;
+
+      pageCount.textContent = '/ ' + pdfDoc.numPages;
+      currentPage = 1;
+      pageInput.value = 1;
+      pageInput.max = pdfDoc.numPages;
+
+      addToRecent(file);
+
+      await renderPage(currentPage);
+      await buildThumbnails();
+      renderBookmarksPanel();
+      showLoading(false);
+    }
+
+    // ---------- Rendering ----------
+    async function renderToSlot(pageNum, canvas, overlay) {
+      const page = await pdfDoc.getPage(pageNum);
+      const rotation = getRotation();
+      const viewport = page.getViewport({ scale, rotation });
+      const ctx = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      overlay.width = canvas.width;
+      overlay.height = canvas.height;
+      drawOverlay(pageNum, overlay);
+    }
+
+    function drawOverlay(pageNum, canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const hl = (highlightMap[currentFileName] || {})[pageNum] || [];
+      ctx.fillStyle = 'rgba(255,209,77,0.35)';
+      hl.forEach(r => {
+        ctx.fillRect(r.x0 * canvas.width, r.y0 * canvas.height, (r.x1 - r.x0) * canvas.width, (r.y1 - r.y0) * canvas
+          .height);
+      });
+
+      const sm = matchesByPage[pageNum] || [];
+      ctx.fillStyle = 'rgba(58,143,146,0.5)';
+      sm.forEach(r => {
+        ctx.fillRect(r.x0 * canvas.width, r.y0 * canvas.height, (r.x1 - r.x0) * canvas.width, (r.y1 - r.y0) * canvas
+          .height);
+      });
+    }
+
+    async function renderPage(num) {
+      if (!pdfDoc) return;
+      currentPage = Math.min(Math.max(1, num), pdfDoc.numPages);
+      pageInput.value = currentPage;
+
+      await renderToSlot(currentPage, pageCanvas, annotCanvas);
+
+      if (spreadMode && currentPage + 1 <= pdfDoc.numPages) {
+        slotB.classList.remove('hidden');
+        await renderToSlot(currentPage + 1, pageCanvas2, annotCanvas2);
+      } else {
+        slotB.classList.add('hidden');
+      }
+
+      highlightThumb(currentPage);
+      updateBookmarkBtn();
+      updateNoteUI();
+    }
+
+    async function buildThumbnails() {
+      thumbsContainer.innerHTML = '';
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'thumb';
+        wrap.dataset.page = i;
+        const c = document.createElement('canvas');
+        const label = document.createElement('div');
+        label.className = 'num';
+        label.textContent = i;
+        wrap.appendChild(c);
+        wrap.appendChild(label);
+        if ((bookmarkMap[currentFileName] || new Set()).has(i)) {
+          const bm = document.createElement('div');
+          bm.className = 'bm';
+          bm.textContent = '★';
+          wrap.appendChild(bm);
+        }
+        thumbsContainer.appendChild(wrap);
+
+        wrap.addEventListener('click', () => renderPage(i));
+
+        const page = await pdfDoc.getPage(i);
+        const vp = page.getViewport({ scale: 0.22 });
+        c.width = vp.width;
+        c.height = vp.height;
+        page.render({ canvasContext: c.getContext('2d'), viewport: vp });
+      }
+      highlightThumb(currentPage);
+    }
+
+    function highlightThumb(num) {
+      document.querySelectorAll('#thumbsContainer .thumb').forEach(t => {
+        t.classList.toggle('active', Number(t.dataset.page) === num);
+      });
+      const active = document.querySelector('#thumbsContainer .thumb.active');
+      if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function updateZoomLabel() { zoomLabel.textContent = Math.round(scale / 1.35 * 100) + '%'; }
+
+    // ---------- Basic controls ----------
+    document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) renderPage(currentPage -
+        1); });
+    document.getElementById('nextPage').addEventListener('click', () => { if (pdfDoc && currentPage < pdfDoc.numPages)
+        renderPage(currentPage + 1); });
+    pageInput.addEventListener('change', () => {
+      let n = Number(pageInput.value);
+      if (pdfDoc) {
+        n = Math.min(Math.max(1, n), pdfDoc.numPages);
+        renderPage(n);
+      }
+    });
+    document.getElementById('zoomIn').addEventListener('click', () => { scale = Math.min(scale * 1.15, 4.5);
+      updateZoomLabel();
+      renderPage(currentPage); });
+    document.getElementById('zoomOut').addEventListener('click', () => { scale = Math.max(scale / 1.15, 0.4);
+      updateZoomLabel();
+      renderPage(currentPage); });
+    document.getElementById('fitWidth').addEventListener('click', async () => {
+      if (!pdfDoc) return;
+      const page = await pdfDoc.getPage(currentPage);
+      const naturalViewport = page.getViewport({ scale: 1 });
+      const available = spreadMode ? (viewerWrap.clientWidth - 80) / 2 : viewerWrap.clientWidth - 60;
+      scale = available / naturalViewport.width;
+      updateZoomLabel();
+      renderPage(currentPage);
+    });
+    document.getElementById('toggleSidebar').addEventListener('click', () => sidebar.classList.toggle('hidden'));
+    downloadBtn.addEventListener('click', () => {
+      if (!currentFileURL) return;
+      const a = document.createElement('a');
+      a.href = currentFileURL;
+      a.download = currentFileName || 'documento.pdf';
+      a.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files[0]) {
+        folderFiles = [];
+        currentDocIndex = -1;
+        doclist.classList.remove('active');
+        docNav.style.display = 'none';
+        loadPDF(e.target.files[0]);
+      }
+    });
+    browseLink.addEventListener('click', () => fileInput.click());
+
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, e => { e.preventDefault();
+        dropZone.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+      dropZone.addEventListener(evt, e => { e.preventDefault();
+        dropZone.classList.remove('dragover'); });
+    });
+    dropZone.addEventListener('drop', e => {
+      const file = e.dataTransfer.files[0];
+      if (file && file.type === 'application/pdf') loadPDF(file);
+    });
+
+    // ---------- Carpeta ----------
+    folderInput.addEventListener('change', (e) => {
+      const pdfs = Array.from(e.target.files)
+        .filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
+        .sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true, sensitivity: 'base' }));
+
+      if (pdfs.length === 0) {
+        alert('No se encontraron archivos PDF en esa carpeta.');
+        return;
+      }
+
+      folderFiles = pdfs;
+      renderDocList();
+      sidebar.classList.remove('hidden');
+      doclist.classList.add('active');
+      docNav.style.display = 'flex';
+      selectDocument(0);
+    });
+
+    function renderDocList() {
+      doclistItems.innerHTML = '';
+      doclistCount.textContent = folderFiles.length;
+      folderFiles.forEach((file, idx) => {
+        const item = document.createElement('div');
+        item.className = 'list-item';
+        item.dataset.index = idx;
+        item.dataset.name = file.name.toLowerCase();
+        item.title = file.name;
+        item.innerHTML =
+          '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/></svg><span></span>';
+        item.querySelector('span').textContent = file.name;
+        item.addEventListener('click', () => selectDocument(idx));
+        doclistItems.appendChild(item);
+      });
+      highlightDocItem();
+    }
+    doclistFilter.addEventListener('input', () => {
+      const q = doclistFilter.value.toLowerCase().trim();
+      document.querySelectorAll('#doclistItems .list-item').forEach(el => {
+        el.style.display = el.dataset.name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    function highlightDocItem() {
+      document.querySelectorAll('#doclistItems .list-item').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.index) === currentDocIndex);
+      });
+      const active = document.querySelector('#doclistItems .list-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+      prevDocBtn.disabled = currentDocIndex <= 0;
+      nextDocBtn.disabled = currentDocIndex >= folderFiles.length - 1;
+    }
+
+    async function selectDocument(idx) {
+      if (idx < 0 || idx >= folderFiles.length) return;
+      currentDocIndex = idx;
+      highlightDocItem();
+      await loadPDF(folderFiles[idx]);
+    }
+    prevDocBtn.addEventListener('click', () => { if (currentDocIndex > 0) selectDocument(currentDocIndex - 1); });
+    nextDocBtn.addEventListener('click', () => { if (currentDocIndex < folderFiles.length - 1) selectDocument(
+        currentDocIndex + 1); });
+
+    // ---------- Recientes ----------
+    function addToRecent(file) {
+      recentFiles = recentFiles.filter(r => r.name !== file.name);
+      recentFiles.unshift({ name: file.name, file });
+      if (recentFiles.length > 8) recentFiles = recentFiles.slice(0, 8);
+      renderRecentPanel();
+    }
+
+    function renderRecentPanel() {
+      recentItems.innerHTML = '';
+      recentCount.textContent = recentFiles.length;
+      recentPanel.classList.toggle('active', recentFiles.length > 0);
+      recentFiles.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'list-item';
+        if (r.name === currentFileName) item.classList.add('active');
+        item.title = r.name;
+        item.innerHTML =
+          '<svg viewBox="0 0 24 24"><path d="M12 8v4l3 3M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg><span></span>';
+        item.querySelector('span').textContent = r.name;
+        item.addEventListener('click', () => loadPDF(r.file));
+        recentItems.appendChild(item);
+      });
+    }
+
+    // ---------- Rotar ----------
+    rotateBtn.addEventListener('click', () => {
+      if (!currentFileName) return;
+      rotationMap[currentFileName] = ((rotationMap[currentFileName] || 0) + 90) % 360;
+      renderPage(currentPage);
+    });
+
+    // ---------- Vista de dos páginas ----------
+    spreadBtn.addEventListener('click', () => {
+      spreadMode = !spreadMode;
+      spreadBtn.classList.toggle('active', spreadMode);
+      renderPage(currentPage);
+    });
+
+    // ---------- Pantalla completa ----------
+    fullscreenBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fullscreenBtn.classList.toggle('active', !!document.fullscreenElement);
+    });
+
+    // ---------- Resaltado ----------
+    highlightBtn.addEventListener('click', () => {
+      // If zoom mode is active, exit it
+      if (zoomMode) exitZoomMode();
+      annotMode = !annotMode;
+      highlightBtn.classList.toggle('active', annotMode);
+      slotA.classList.toggle('annot-mode', annotMode);
+      slotB.classList.toggle('annot-mode', annotMode);
+    });
+    clearHighlightBtn.addEventListener('click', () => {
+      if (!currentFileName) return;
+      if (!(highlightMap[currentFileName] || {})[currentPage]) return;
+      if (!confirm('¿Borrar los resaltados de esta página?')) return;
+      delete highlightMap[currentFileName][currentPage];
+      renderPage(currentPage);
+    });
+
+    function attachDrawing(canvas, getPageNum) {
+      canvas.addEventListener('mousedown', e => {
+        if (zoomMode) {
+          // Let zoom mode handle it
+          return;
+        }
+        if (!annotMode || !pdfDoc) return;
+        isDrawing = true;
+        drawTargetCanvas = canvas;
+        drawTargetPage = getPageNum();
+        const rect = canvas.getBoundingClientRect();
+        drawStart = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+      });
+      canvas.addEventListener('mousemove', e => {
+        if (zoomMode) return;
+        if (!isDrawing || drawTargetCanvas !== canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const cur = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+        drawOverlay(drawTargetPage, canvas);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(255,209,77,0.35)';
+        const x0 = Math.min(drawStart.x, cur.x),
+          x1 = Math.max(drawStart.x, cur.x);
+        const y0 = Math.min(drawStart.y, cur.y),
+          y1 = Math.max(drawStart.y, cur.y);
+        ctx.fillRect(x0 * canvas.width, y0 * canvas.height, (x1 - x0) * canvas.width, (y1 - y0) * canvas.height);
+      });
+      window.addEventListener('mouseup', e => {
+        if (zoomMode) return;
+        if (!isDrawing || drawTargetCanvas !== canvas) return;
+        isDrawing = false;
+        const rect = canvas.getBoundingClientRect();
+        const cur = {
+          x: Math.min(Math.max(0, (e.clientX - rect.left) / rect.width), 1),
+          y: Math.min(Math.max(0, (e.clientY - rect.top) / rect.height), 1)
+        };
+        const x0 = Math.min(drawStart.x, cur.x),
+          x1 = Math.max(drawStart.x, cur.x);
+        const y0 = Math.min(drawStart.y, cur.y),
+          y1 = Math.max(drawStart.y, cur.y);
+        if (x1 - x0 > 0.005 && y1 - y0 > 0.005) {
+          ensureDocMaps(currentFileName);
+          if (!highlightMap[currentFileName][drawTargetPage]) highlightMap[currentFileName][drawTargetPage] = [];
+          highlightMap[currentFileName][drawTargetPage].push({ x0, y0, x1, y1 });
+        }
+        drawOverlay(drawTargetPage, canvas);
+        drawTargetCanvas = null;
+      });
+    }
+    attachDrawing(annotCanvas, () => currentPage);
+    attachDrawing(annotCanvas2, () => currentPage + 1);
+
+    // ---------- ZOOM BY AREA (Button mode) ----------
+    function enterZoomMode() {
+      zoomMode = true;
+      zoomAreaBtn.classList.add('active');
+      zoomHint.classList.add('active');
+      slotA.classList.add('zoom-mode');
+      slotB.classList.add('zoom-mode');
+      // Disable annotation mode if active
+      if (annotMode) {
+        annotMode = false;
+        highlightBtn.classList.remove('active');
+        slotA.classList.remove('annot-mode');
+        slotB.classList.remove('annot-mode');
+      }
+    }
+
+    function exitZoomMode() {
+      zoomMode = false;
+      zoomAreaBtn.classList.remove('active');
+      zoomHint.classList.remove('active');
+      slotA.classList.remove('zoom-mode');
+      slotB.classList.remove('zoom-mode');
+      zoomSelection.style.display = 'none';
+      isZoomSelecting = false;
+      zoomStart = null;
+    }
+
+    zoomAreaBtn.addEventListener('click', () => {
+      if (!pdfDoc) return;
+      if (zoomMode) {
+        exitZoomMode();
+      } else {
+        enterZoomMode();
+      }
+    });
+
+    // Convert a viewport (client) point into a coordinate inside the
+    // scrollable content of the viewer, so the selection box lines up with
+    // the page even after the viewer has been scrolled.
+    function viewerContentPoint(clientX, clientY) {
+      const rect = viewerWrap.getBoundingClientRect();
+      return {
+        x: clientX - rect.left + viewerWrap.scrollLeft,
+        y: clientY - rect.top + viewerWrap.scrollTop
+      };
+    }
+
+    // Scroll the viewer so that the given fractional point (0..1) of a page
+    // ends up centered in the visible area. Works for either slot and in
+    // both axes. Uses live bounding rects so it is independent of layout.
+    function scrollToPageFraction(pageNum, fx, fy) {
+      let canvas = pageCanvas;
+      if (spreadMode && pageNum === currentPage + 1 && !slotB.classList.contains('hidden')) {
+        canvas = pageCanvas2;
+      }
+      const cRect = canvas.getBoundingClientRect();
+      const vRect = viewerWrap.getBoundingClientRect();
+      const targetX = (cRect.left - vRect.left) + viewerWrap.scrollLeft + fx * cRect.width;
+      const targetY = (cRect.top - vRect.top) + viewerWrap.scrollTop + fy * cRect.height;
+      viewerWrap.scrollTo({
+        left: Math.max(0, targetX - viewerWrap.clientWidth / 2),
+        top: Math.max(0, targetY - viewerWrap.clientHeight / 2),
+        behavior: 'smooth'
+      });
+    }
+
+    // Given a selected rectangle (fractions of the page), pick a scale that
+    // makes that area fill the viewer, re-render and center it.
+    async function applyAreaZoom(pageNum, l, t, r, b) {
+      const page = await pdfDoc.getPage(pageNum);
+      const vp = page.getViewport({ scale: 1, rotation: getRotation() });
+      const selW = (r - l) * vp.width;
+      const selH = (b - t) * vp.height;
+      if (selW <= 0 || selH <= 0) return;
+
+      const availW = viewerWrap.clientWidth - 60;
+      const availH = viewerWrap.clientHeight - 80;
+
+      let newScale = Math.min(availW / selW, availH / selH);
+      newScale = Math.max(0.4, Math.min(5, newScale));
+
+      scale = newScale;
+      updateZoomLabel();
+      exitZoomMode();
+
+      await renderPage(pageNum);
+      scrollToPageFraction(pageNum, (l + r) / 2, (t + b) / 2);
+    }
+
+    // Handle zoom selection on canvases
+    function handleZoomSelectionStart(e) {
+      if (!zoomMode || !pdfDoc) return;
+
+      const target = e.target.closest('canvas');
+      if (!target) return;
+      const slot = target.closest('.page-slot');
+      if (!slot) return;
+
+      let pageNum = currentPage;
+      if (slot.id === 'slotB') {
+        pageNum = currentPage + 1;
+        if (slotB.classList.contains('hidden') || pageNum > pdfDoc.numPages) return;
+      }
+
+      isZoomSelecting = true;
+      const start = viewerContentPoint(e.clientX, e.clientY);
+      zoomStart = {
+        startContent: start, // anchor in content coordinates
+        clientX: e.clientX,
+        clientY: e.clientY,
+        page: pageNum,
+        canvas: target
+      };
+
+      zoomSelection.style.display = 'block';
+      zoomSelection.style.left = start.x + 'px';
+      zoomSelection.style.top = start.y + 'px';
+      zoomSelection.style.width = '0px';
+      zoomSelection.style.height = '0px';
+
+      e.preventDefault();
+    }
+
+    function handleZoomSelectionMove(e) {
+      if (!isZoomSelecting || !zoomStart) return;
+
+      const start = zoomStart.startContent;
+      const cur = viewerContentPoint(e.clientX, e.clientY);
+
+      zoomSelection.style.left = Math.min(start.x, cur.x) + 'px';
+      zoomSelection.style.top = Math.min(start.y, cur.y) + 'px';
+      zoomSelection.style.width = Math.abs(cur.x - start.x) + 'px';
+      zoomSelection.style.height = Math.abs(cur.y - start.y) + 'px';
+
+      e.preventDefault();
+    }
+
+    async function handleZoomSelectionEnd(e) {
+      if (!isZoomSelecting || !zoomStart) return;
+
+      isZoomSelecting = false;
+      zoomSelection.style.display = 'none';
+
+      const canvas = zoomStart.canvas;
+      const pageNum = zoomStart.page;
+      const cRect = canvas.getBoundingClientRect();
+
+      // Selection as fractions of the actual page/canvas, measured from the
+      // live canvas rect so it stays correct regardless of scroll position.
+      const fx0 = (zoomStart.clientX - cRect.left) / cRect.width;
+      const fy0 = (zoomStart.clientY - cRect.top) / cRect.height;
+      const fx1 = (e.clientX - cRect.left) / cRect.width;
+      const fy1 = (e.clientY - cRect.top) / cRect.height;
+
+      zoomStart = null;
+
+      const clamp = v => Math.max(0, Math.min(1, v));
+      const l = clamp(Math.min(fx0, fx1));
+      const t = clamp(Math.min(fy0, fy1));
+      const r = clamp(Math.max(fx0, fx1));
+      const b = clamp(Math.max(fy0, fy1));
+
+      // Ignore tiny / accidental selections.
+      if (r - l < 0.02 || b - t < 0.02) return;
+
+      await applyAreaZoom(pageNum, l, t, r, b);
+    }
+
+    // Attach zoom selection events to the viewer
+    viewerWrap.addEventListener('mousedown', handleZoomSelectionStart);
+    document.addEventListener('mousemove', handleZoomSelectionMove);
+    document.addEventListener('mouseup', handleZoomSelectionEnd);
+
+    // ---------- Notas ----------
+    function updateNoteUI() {
+      const text = (noteMap[currentFileName] || {})[currentPage] || '';
+      noteDot.classList.toggle('show', text.trim().length > 0);
+      if (notePanel.classList.contains('active')) {
+        notePageLabel.textContent = currentPage;
+        noteTextarea.value = text;
+      }
+    }
+    noteBtn.addEventListener('click', () => {
+      if (!pdfDoc) return;
+      notePanel.classList.toggle('active');
+      if (notePanel.classList.contains('active')) {
+        notePageLabel.textContent = currentPage;
+        noteTextarea.value = (noteMap[currentFileName] || {})[currentPage] || '';
+        noteTextarea.focus();
+      }
+    });
+    closeNote.addEventListener('click', closeNotePanel);
+
+    function closeNotePanel() { notePanel.classList.remove('active'); }
+    noteTextarea.addEventListener('input', () => {
+      if (!currentFileName) return;
+      ensureDocMaps(currentFileName);
+      noteMap[currentFileName][currentPage] = noteTextarea.value;
+      noteDot.classList.toggle('show', noteTextarea.value.trim().length > 0);
+    });
+
+    // ---------- Marcadores ----------
+    function updateBookmarkBtn() {
+      const set = bookmarkMap[currentFileName] || new Set();
+      bookmarkBtn.classList.toggle('active', set.has(currentPage));
+    }
+    bookmarkBtn.addEventListener('click', () => {
+      if (!currentFileName) return;
+      ensureDocMaps(currentFileName);
+      const set = bookmarkMap[currentFileName];
+      if (set.has(currentPage)) set.delete(currentPage);
+      else set.add(currentPage);
+      updateBookmarkBtn();
+      renderBookmarksPanel();
+      buildThumbnails();
+    });
+
+    function renderBookmarksPanel() {
+      const set = bookmarkMap[currentFileName] || new Set();
+      const pages = Array.from(set).sort((a, b) => a - b);
+      bookmarksPanel.classList.toggle('active', pages.length > 0);
+      bookmarksCount.textContent = pages.length;
+      bookmarksItems.innerHTML = '';
+      pages.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'list-item';
+        item.innerHTML =
+          '<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4V3z"/></svg><span></span>';
+        item.querySelector('span').textContent = 'Página ' + p;
+        item.addEventListener('click', () => renderPage(p));
+        bookmarksItems.appendChild(item);
+      });
+    }
+
+    // ---------- Búsqueda ----------
+    searchBtn.addEventListener('click', () => {
+      searchBar.classList.toggle('active');
+      if (searchBar.classList.contains('active')) searchInput.focus();
+    });
+    closeSearch.addEventListener('click', () => {
+      searchBar.classList.remove('active');
+      matchesByPage = {};
+      flatMatches = [];
+      searchIndex = -1;
+      updateSearchCount();
+      renderPage(currentPage);
+    });
+    searchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') runSearch();
+    });
+    searchNext.addEventListener('click', () => stepMatch(1));
+    searchPrev.addEventListener('click', () => stepMatch(-1));
+
+    function computeItemRect(item, viewport) {
+      const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+      const x = tx[4];
+      const y = tx[5];
+      const height = Math.hypot(tx[2], tx[3]) || 10;
+      const scaleFactor = Math.hypot(viewport.transform[0], viewport.transform[1]);
+      const width = (item.width || 0) * scaleFactor;
+      return {
+        x0: Math.max(0, x / viewport.width),
+        y0: Math.max(0, (y - height) / viewport.height),
+        x1: Math.min(1, (x + width) / viewport.width),
+        y1: Math.min(1, y / viewport.height)
+      };
+    }
+
+    async function runSearch() {
+      const term = searchInput.value.trim().toLowerCase();
+      matchesByPage = {};
+      flatMatches = [];
+      searchIndex = -1;
+      if (!term || !pdfDoc) { updateSearchCount();
+        renderPage(currentPage); return; }
+
+      showLoading(true, 'Buscando…');
+      ensureDocMaps(currentFileName);
+      const rotation = getRotation();
+
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        let tc = textCache[currentFileName][p];
+        if (!tc) {
+          const page = await pdfDoc.getPage(p);
+          tc = await page.getTextContent();
+          textCache[currentFileName][p] = tc;
+        }
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: 1, rotation });
+        const rects = [];
+        tc.items.forEach(item => {
+          if (item.str && item.str.toLowerCase().includes(term)) {
+            const r = computeItemRect(item, viewport);
+            rects.push(r);
+            flatMatches.push({ page: p, rect: r });
+          }
+        });
+        if (rects.length) matchesByPage[p] = rects;
+      }
+
+      showLoading(false);
+      updateSearchCount();
+      if (flatMatches.length) {
+        searchIndex = 0;
+        goToMatch(0);
+      } else {
+        renderPage(currentPage);
+      }
+    }
+
+    function updateSearchCount() {
+      searchCount.textContent = flatMatches.length ?
+        (searchIndex + 1) + ' / ' + flatMatches.length :
+        (searchInput.value.trim() ? 'Sin resultados' : '');
+    }
+
+    async function stepMatch(dir) {
+      if (!flatMatches.length) return;
+      searchIndex = (searchIndex + dir + flatMatches.length) % flatMatches.length;
+      updateSearchCount();
+      await goToMatch(searchIndex);
+    }
+
+    async function goToMatch(idx) {
+      const m = flatMatches[idx];
+      if (!m) return;
+      await renderPage(m.page);
+      scrollToPageFraction(m.page, (m.rect.x0 + m.rect.x1) / 2, (m.rect.y0 + m.rect.y1) / 2);
+    }
+
+    // ---------- Atajos de teclado ----------
+    document.addEventListener('keydown', e => {
+      if (!pdfDoc) return;
+      const inField = document.activeElement === searchInput || document.activeElement === noteTextarea ||
+        document.activeElement === pageInput;
+      if (inField) return;
+
+      // Escape to exit zoom mode
+      if (e.key === 'Escape' && zoomMode) {
+        exitZoomMode();
+        return;
+      }
+
+      if (e.altKey && folderFiles.length) {
+        if (e.key === 'ArrowRight') { e.preventDefault(); if (currentDocIndex < folderFiles.length - 1)
+            selectDocument(currentDocIndex + 1); return; }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentDocIndex > 0) selectDocument(currentDocIndex -
+            1); return; }
+      }
+      if (e.key === 'ArrowRight') { if (currentPage < pdfDoc.numPages) renderPage(currentPage + 1); }
+      if (e.key === 'ArrowLeft') { if (currentPage > 1) renderPage(currentPage - 1); }
+      if (e.key === 'f' && e.ctrlKey) { e.preventDefault();
+        searchBar.classList.add('active');
+        searchInput.focus(); }
+    });
+
+    // ---------- Estado inicial ----------
+    showEmpty(true);
+    sidebar.classList.add('hidden');
+  </script>
+
+</body>
+</html>
