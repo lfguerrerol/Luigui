@@ -5,7 +5,11 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-st.set_page_config(page_title="Procurement Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Procurement Dashboard",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 # Base directory of this script -> makes image/logo paths portable
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -13,12 +17,17 @@ BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 # =============================
 # THEME / CONTRAST  (Fab Tracker style)
 # =============================
+# Discreet: the sidebar starts collapsed and this control is pushed to the
+# very bottom so it stays out of the way.
+st.sidebar.markdown("<div style='height:68vh'></div>", unsafe_allow_html=True)
+st.sidebar.caption("Ajustes")
 contrast = st.sidebar.radio(
     "Contraste visual",
     ["Día", "Noche"],
     index=0,
     key="visual_contrast",
     horizontal=True,
+    label_visibility="collapsed",
 )
 
 if contrast == "Noche":
@@ -97,7 +106,13 @@ section[data-testid="stSidebar"] {{
     border-right: 1px solid var(--border);
 }}
 
-.block-container {{ padding-top: 1.2rem; }}
+/* Streamlit's fixed top toolbar -> keep it transparent so the page bg
+   shows through, and push our content below it so the logo/header don't
+   get clipped by it. */
+[data-testid="stHeader"] {{
+    background: transparent !important;
+}}
+.block-container {{ padding-top: 4.5rem; }}
 
 h1, h2, h3, h4, h5, h6, p, span, label {{ color: var(--text); }}
 
