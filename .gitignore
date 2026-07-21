@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+shopping_with_images.xlsx
+test_template.xlsx
+.DS_Store
