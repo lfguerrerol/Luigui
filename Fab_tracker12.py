@@ -18,7 +18,7 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# http://localhost:8000
+# http://localhost:8010
 
 app = FastAPI()
 
@@ -3129,4 +3129,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(h(App));
 """;
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8010)
