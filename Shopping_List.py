@@ -5,6 +5,8 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
+from report import build_report_pdf
+
 st.set_page_config(
     page_title="Procurement Dashboard",
     layout="wide",
@@ -304,6 +306,37 @@ def eta_days(df):
     return pd.to_numeric(num, errors="coerce")
 
 
+def collect_eta(data):
+    """Build a DataFrame of every item with a valid ETA (delivery lead time)."""
+    rows = []
+    for label, df in data.items():
+        if df.empty:
+            continue
+        days = eta_days(df)
+        desc_col = find_col(df, "Description")
+        for idx in df.index:
+            d = days.get(idx, float("nan"))
+            if pd.notna(d):
+                rows.append({
+                    "Item": str(df.loc[idx, desc_col]) if desc_col else str(idx),
+                    "Category": label,
+                    "ETA (days)": float(d),
+                })
+    return pd.DataFrame(rows)
+
+
+def collect_cost(data):
+    """Concatenate all categories (adding a Category column) for ranking."""
+    frames = []
+    for label, df in data.items():
+        if df.empty:
+            continue
+        d = df.copy()
+        d["Category"] = label
+        frames.append(d)
+    return pd.concat(frames) if frames else pd.DataFrame()
+
+
 # =============================
 # KPI
 # =============================
@@ -340,6 +373,44 @@ for df in data.values():
     s = status_summary(df)
     for k in status_totals:
         status_totals[k] += s[k]
+
+# =============================
+# PRE-COMPUTE RANKINGS (shared by dashboard + PDF)
+# =============================
+eta_all = collect_eta(data)
+top10_eta = (eta_all.sort_values("ETA (days)", ascending=False).head(10)
+             if not eta_all.empty else eta_all)
+
+cost_all = collect_cost(data)
+top10_cost = (cost_all.sort_values("Total Cost USD", ascending=False).head(10)
+              if not cost_all.empty else cost_all)
+
+# =============================
+# EXPORT TO PDF (presentation-style, landscape)
+# =============================
+exp_l, exp_r = st.columns([3, 1])
+with exp_r:
+    try:
+        pdf_bytes = build_report_pdf({
+            "totals": totals,
+            "total_all": total_all,
+            "budget": budget,
+            "delta": delta,
+            "status": status_totals,
+            "top_eta": top10_eta,
+            "top_cost": top10_cost,
+            "logo": logo_path,
+        })
+        st.download_button(
+            "⬇️ Exportar reporte PDF",
+            data=pdf_bytes,
+            file_name="Procurement_Report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            help="Genera un reporte tipo presentación (horizontal) para dirección.",
+        )
+    except Exception as e:  # pragma: no cover - never break the dashboard
+        st.warning(f"No se pudo generar el PDF: {e}")
 
 # =============================
 # ROW: BUDGET (left)  ||  STATUS + ETA TOP-10 (right)
@@ -381,31 +452,9 @@ with col_right:
         s3.metric("🔴 PENDING", status_totals["PENDING"])
 
     with st.expander("⏱️ Top 10 Longest Delivery Times (ETA)", expanded=True):
-        eta_rows = []
-        for label, df in data.items():
-            if df.empty:
-                continue
-            days = eta_days(df)
-            desc_col = find_col(df, "Description")
-            for idx in df.index:
-                d = days.get(idx, float("nan"))
-                if pd.notna(d):
-                    eta_rows.append(
-                        {
-                            "Item": str(df.loc[idx, desc_col]) if desc_col else str(idx),
-                            "Category": label,
-                            "ETA (days)": float(d),
-                        }
-                    )
-
-        if eta_rows:
-            eta_df = (
-                pd.DataFrame(eta_rows)
-                .sort_values("ETA (days)", ascending=False)
-                .head(10)
-            )
+        if not top10_eta.empty:
             eta_chart = (
-                alt.Chart(eta_df)
+                alt.Chart(top10_eta)
                 .mark_bar(cornerRadiusEnd=6)
                 .encode(
                     y=alt.Y("Item:N", sort="-x", title=None,
@@ -441,11 +490,8 @@ with st.expander("🧠 Key Insights", expanded=True):
 # TOP 10 COST ITEMS
 # =============================
 with st.expander("🔝 Top 10 Cost Items", expanded=True):
-    non_empty = [d for d in data.values() if not d.empty]
-    if non_empty:
-        combined = pd.concat(non_empty)
-        top10 = combined.sort_values(by="Total Cost USD", ascending=False).head(10)
-        st.dataframe(top10, use_container_width=True)
+    if not top10_cost.empty:
+        st.dataframe(top10_cost, use_container_width=True)
 
 # =============================
 # STATUS COLORING FOR TABLES
