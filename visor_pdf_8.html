@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Visor de Documentos — v7</title>
+<title>Visor de Documentos — v8</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
 </script>
 <style>
@@ -464,13 +464,101 @@
   }
 
   /* ---------- Viewer ---------- */
+  /* Shell holds the scrolling viewer plus the custom scrollbars overlaid on
+     top of it. It does not scroll itself. */
+  .viewer-shell {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    overflow: hidden;
+  }
+
   .viewer-wrap {
     flex: 1;
     overflow: auto;
+    min-width: 0;
+    min-height: 0;
     background:
       radial-gradient(circle at 50% 0%, rgba(58, 143, 146, .06), transparent 60%),
       var(--navy-950);
     position: relative;
+    /* Hide native scrollbars — we render our own always-visible ones so they
+       look identical on every OS/browser (native ones are overlay/auto-hide
+       on macOS & Linux and were effectively invisible). */
+    scrollbar-width: none;
+  }
+
+  .viewer-wrap::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  /* ---- Custom always-visible scrollbars ---- */
+  .cbar {
+    position: absolute;
+    background: var(--navy-900);
+    z-index: 8;
+    display: none;
+  }
+
+  .cbar.show {
+    display: block;
+  }
+
+  .cbar-v {
+    top: 0;
+    right: 0;
+    width: 14px;
+    bottom: 0;
+    border-left: 1px solid var(--navy-700);
+  }
+
+  .cbar-h {
+    left: 0;
+    bottom: 0;
+    height: 14px;
+    right: 0;
+    border-top: 1px solid var(--navy-700);
+  }
+
+  /* When both bars show, leave room in each track for the other. */
+  .cbar-v.both {
+    bottom: 14px;
+  }
+
+  .cbar-h.both {
+    right: 14px;
+  }
+
+  .cthumb {
+    position: absolute;
+    background: var(--ink-600);
+    border-radius: 7px;
+    transition: background .15s;
+  }
+
+  .cthumb:hover,
+  .cthumb.dragging {
+    background: var(--gold);
+  }
+
+  .cbar-v .cthumb {
+    left: 2px;
+    right: 2px;
+    cursor: grab;
+  }
+
+  .cbar-h .cthumb {
+    top: 2px;
+    bottom: 2px;
+    cursor: grab;
+  }
+
+  .cthumb.dragging {
+    cursor: grabbing;
   }
 
   /* Inner container that actually holds the pages. Keeping the flex layout
@@ -928,29 +1016,35 @@
       <div class="thumbs-list" id="thumbsContainer"></div>
     </div>
 
-    <div class="viewer-wrap" id="viewerWrap">
-      <!-- Zoom selection overlay -->
-      <div class="zoom-selection" id="zoomSelection"></div>
-      <div class="zoom-mode-hint" id="zoomHint">🔍 Arrastra para seleccionar el área a ampliar</div>
+    <div class="viewer-shell" id="viewerShell">
+      <div class="viewer-wrap" id="viewerWrap">
+        <!-- Zoom selection overlay -->
+        <div class="zoom-selection" id="zoomSelection"></div>
+        <div class="zoom-mode-hint" id="zoomHint">🔍 Arrastra para seleccionar el área a ampliar</div>
 
-      <div class="pages-container" id="pagesContainer">
-        <div class="page-slot" id="slotA">
-          <canvas class="base" id="pageCanvas"></canvas>
-          <canvas class="overlay" id="annotCanvas"></canvas>
+        <div class="pages-container" id="pagesContainer">
+          <div class="page-slot" id="slotA">
+            <canvas class="base" id="pageCanvas"></canvas>
+            <canvas class="overlay" id="annotCanvas"></canvas>
+          </div>
+          <div class="page-slot hidden" id="slotB">
+            <canvas class="base" id="pageCanvas2"></canvas>
+            <canvas class="overlay" id="annotCanvas2"></canvas>
+          </div>
         </div>
-        <div class="page-slot hidden" id="slotB">
-          <canvas class="base" id="pageCanvas2"></canvas>
-          <canvas class="overlay" id="annotCanvas2"></canvas>
+
+        <div class="note-panel" id="notePanel">
+          <div class="note-panel-title">
+            <span>Nota — página <span id="notePageLabel">1</span></span>
+            <button id="closeNote">×</button>
+          </div>
+          <textarea id="noteTextarea" placeholder="Escribe una nota para esta página…"></textarea>
         </div>
       </div>
 
-      <div class="note-panel" id="notePanel">
-        <div class="note-panel-title">
-          <span>Nota — página <span id="notePageLabel">1</span></span>
-          <button id="closeNote">×</button>
-        </div>
-        <textarea id="noteTextarea" placeholder="Escribe una nota para esta página…"></textarea>
-      </div>
+      <!-- Custom always-visible scrollbars -->
+      <div class="cbar cbar-v" id="cbarV"><div class="cthumb" id="cthumbV"></div></div>
+      <div class="cbar cbar-h" id="cbarH"><div class="cthumb" id="cthumbH"></div></div>
     </div>
 
     <div class="empty" id="emptyState">
@@ -980,6 +1074,11 @@
     const loadingState = document.getElementById('loadingState');
     const loadingLabel = document.getElementById('loadingLabel');
     const viewerWrap = document.getElementById('viewerWrap');
+    const viewerShell = document.getElementById('viewerShell');
+    const cbarV = document.getElementById('cbarV');
+    const cbarH = document.getElementById('cbarH');
+    const cthumbV = document.getElementById('cthumbV');
+    const cthumbH = document.getElementById('cthumbH');
     const pageCanvas = document.getElementById('pageCanvas');
     const annotCanvas = document.getElementById('annotCanvas');
     const pageCanvas2 = document.getElementById('pageCanvas2');
@@ -1082,7 +1181,8 @@
 
     function showEmpty(show) {
       emptyState.classList.toggle('hidden', !show);
-      viewerWrap.style.display = show ? 'none' : 'block';
+      viewerShell.style.display = show ? 'none' : 'flex';
+      if (!show) updateCustomScrollbars();
     }
 
     function showLoading(show, label) {
@@ -1178,6 +1278,7 @@
       highlightThumb(currentPage);
       updateBookmarkBtn();
       updateNoteUI();
+      updateCustomScrollbars();
     }
 
     async function buildThumbnails() {
@@ -1636,6 +1737,104 @@
     viewerWrap.addEventListener('mousedown', handleZoomSelectionStart);
     document.addEventListener('mousemove', handleZoomSelectionMove);
     document.addEventListener('mouseup', handleZoomSelectionEnd);
+
+    // ---------- Custom scrollbars (always visible, cross-browser) ----------
+    const MIN_THUMB = 28; // px
+
+    function updateCustomScrollbars() {
+      if (!viewerShell || viewerShell.style.display === 'none') return;
+
+      const sw = viewerWrap.scrollWidth, cw = viewerWrap.clientWidth;
+      const sh = viewerWrap.scrollHeight, ch = viewerWrap.clientHeight;
+      const needH = sw - cw > 1;
+      const needV = sh - ch > 1;
+
+      cbarV.classList.toggle('show', needV);
+      cbarH.classList.toggle('show', needH);
+      // Reserve corner space when both are present.
+      cbarV.classList.toggle('both', needV && needH);
+      cbarH.classList.toggle('both', needV && needH);
+
+      if (needV) {
+        const track = cbarV.clientHeight;
+        const th = Math.max(MIN_THUMB, track * ch / sh);
+        const maxScroll = sh - ch;
+        const maxTop = track - th;
+        const top = maxScroll > 0 ? (viewerWrap.scrollTop / maxScroll) * maxTop : 0;
+        cthumbV.style.height = th + 'px';
+        cthumbV.style.top = top + 'px';
+      }
+      if (needH) {
+        const track = cbarH.clientWidth;
+        const tw = Math.max(MIN_THUMB, track * cw / sw);
+        const maxScroll = sw - cw;
+        const maxLeft = track - tw;
+        const left = maxScroll > 0 ? (viewerWrap.scrollLeft / maxScroll) * maxLeft : 0;
+        cthumbH.style.width = tw + 'px';
+        cthumbH.style.left = left + 'px';
+      }
+    }
+
+    // Drag handling for a thumb along one axis.
+    function makeThumbDraggable(thumb, axis) {
+      thumb.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        thumb.classList.add('dragging');
+        const startPos = axis === 'v' ? e.clientY : e.clientX;
+        const startScroll = axis === 'v' ? viewerWrap.scrollTop : viewerWrap.scrollLeft;
+        const track = axis === 'v' ? cbarV.clientHeight : cbarH.clientWidth;
+        const thumbSize = axis === 'v' ? thumb.offsetHeight : thumb.offsetWidth;
+        const maxScroll = axis === 'v'
+          ? viewerWrap.scrollHeight - viewerWrap.clientHeight
+          : viewerWrap.scrollWidth - viewerWrap.clientWidth;
+        const maxThumb = track - thumbSize;
+
+        function onMove(ev) {
+          const pos = axis === 'v' ? ev.clientY : ev.clientX;
+          const delta = pos - startPos;
+          const scrollDelta = maxThumb > 0 ? (delta / maxThumb) * maxScroll : 0;
+          if (axis === 'v') viewerWrap.scrollTop = startScroll + scrollDelta;
+          else viewerWrap.scrollLeft = startScroll + scrollDelta;
+        }
+        function onUp() {
+          thumb.classList.remove('dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+
+    // Click on the track (outside the thumb) pages toward the click.
+    function makeTrackClickable(bar, thumb, axis) {
+      bar.addEventListener('mousedown', e => {
+        if (e.target === thumb) return;
+        const rect = bar.getBoundingClientRect();
+        const clickPos = axis === 'v' ? e.clientY - rect.top : e.clientX - rect.left;
+        const thumbStart = axis === 'v' ? thumb.offsetTop : thumb.offsetLeft;
+        const thumbSize = axis === 'v' ? thumb.offsetHeight : thumb.offsetWidth;
+        const page = axis === 'v' ? viewerWrap.clientHeight : viewerWrap.clientWidth;
+        const dir = clickPos < thumbStart ? -1 : (clickPos > thumbStart + thumbSize ? 1 : 0);
+        if (!dir) return;
+        if (axis === 'v') viewerWrap.scrollTop += dir * page * 0.9;
+        else viewerWrap.scrollLeft += dir * page * 0.9;
+      });
+    }
+
+    makeThumbDraggable(cthumbV, 'v');
+    makeThumbDraggable(cthumbH, 'h');
+    makeTrackClickable(cbarV, cthumbV, 'v');
+    makeTrackClickable(cbarH, cthumbH, 'h');
+
+    viewerWrap.addEventListener('scroll', updateCustomScrollbars);
+    window.addEventListener('resize', updateCustomScrollbars);
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => updateCustomScrollbars());
+      ro.observe(viewerWrap);
+      ro.observe(document.getElementById('pagesContainer'));
+    }
 
     // ---------- Notas ----------
     function updateNoteUI() {
