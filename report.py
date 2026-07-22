@@ -1,11 +1,13 @@
 """Landscape (16:9) presentation-style PDF report for the Procurement Dashboard.
 
-Builds a small slide deck (cover, executive summary, status + ETA, top costs)
-with matplotlib so it works headless — no browser required.
+Builds a small slide deck (cover, executive summary, status + ETA, top costs
+and one detail-table section per category) with matplotlib so it works
+headless — no browser required.
 """
 
 import datetime
 import io
+import math
 import os
 
 import matplotlib
@@ -27,10 +29,24 @@ RED = "#dc2626"
 WHITE = "#ffffff"
 
 FIGSIZE = (13.33, 7.5)  # 16:9 presentation
-
 CAT_COLORS = ["#2563eb", "#0891b2", "#7c3aed", "#0ea5e9", "#f59e0b", "#14b8a6"]
+ROWS_PER_PAGE = 15  # detail table rows before spilling to a new slide
+
+# Columns shown in the detail tables (label, relative width)
+DETAIL_COLS = [
+    ("ITEM", 0.05),
+    ("Description", 0.33),
+    ("Supplier", 0.16),
+    ("Qty", 0.07),
+    ("Total Cost USD", 0.14),
+    ("Status", 0.13),
+    ("ETA", 0.08),
+]
 
 
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
 def _new_slide(facecolor=WHITE):
     fig = plt.figure(figsize=FIGSIZE)
     fig.patch.set_facecolor(facecolor)
@@ -43,34 +59,77 @@ def _footer(fig, page, total):
 
 
 def _title(fig, text):
-    fig.add_axes([0, 0.88, 1, 0.12]).axis("off")
     fig.text(0.04, 0.9, text, color=NAVY, fontsize=22, fontweight="bold")
-    # accent underline
     ax = fig.add_axes([0.04, 0.87, 0.14, 0.006])
     ax.axis("off")
     ax.add_patch(Rectangle((0, 0), 1, 1, color=BLUE, transform=ax.transAxes))
 
 
 def _truncate(s, n=34):
-    s = str(s)
+    s = "" if s is None else str(s)
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _find(df, name):
+    """Case-insensitive column lookup."""
+    for c in df.columns:
+        if str(c).strip().lower() == name.lower():
+            return c
+    return None
+
+
+def _tiles(fig, rect, items):
+    ax = fig.add_axes(rect)
+    ax.axis("off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    n = len(items)
+    gap = 0.012
+    w = (1 - gap * (n - 1)) / n
+    for i, (label, val, accent) in enumerate(items):
+        x = i * (w + gap)
+        ax.add_patch(Rectangle((x, 0), w, 1, facecolor=CARD, edgecolor=BORDER,
+                               linewidth=1))
+        ax.add_patch(Rectangle((x, 0), 0.008, 1, color=accent))
+        ax.text(x + 0.02, 0.66, label, fontsize=8.5, color=SLATE,
+                fontweight="bold")
+        ax.text(x + 0.02, 0.26, val, fontsize=13.5, color=NAVY,
+                fontweight="bold")
+
+
+def _style_table(table, status_col=None, cell_text=None):
+    """Apply the shared header/zebra styling (+ optional Status coloring)."""
+    for (r, c), cell in table.get_celld().items():
+        cell.set_edgecolor(BORDER)
+        if r == 0:
+            cell.set_facecolor(NAVY)
+            cell.set_text_props(color=WHITE, fontweight="bold")
+        else:
+            cell.set_facecolor(CARD if r % 2 else WHITE)
+            cell.set_text_props(color=NAVY)
+            if status_col is not None and c == status_col and cell_text is not None:
+                txt = str(cell_text[r - 1][status_col]).lower()
+                if "po" in txt:
+                    cell.set_text_props(color=GREEN, fontweight="bold")
+                elif "process" in txt:
+                    cell.set_text_props(color=AMBER, fontweight="bold")
+                elif txt.strip() not in ("", "—"):
+                    cell.set_text_props(color=RED, fontweight="bold")
 
 
 # ---------------------------------------------------------------------------
 # SLIDES
 # ---------------------------------------------------------------------------
-def _cover(pdf, d, npages):
+def _cover(pdf, d, page, npages):
     fig = _new_slide(NAVY)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
 
-    # bottom accent band
     ax.add_patch(Rectangle((0, 0), 1, 0.12, color=BLUE))
     ax.add_patch(Rectangle((0, 0.12), 1, 0.012, color=INDIGO))
 
-    # logo (top-right)
     logo = d.get("logo")
     if logo and os.path.exists(logo):
         try:
@@ -108,26 +167,7 @@ def _cover(pdf, d, npages):
     plt.close(fig)
 
 
-def _tiles(fig, rect, items):
-    ax = fig.add_axes(rect)
-    ax.axis("off")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    n = len(items)
-    gap = 0.012
-    w = (1 - gap * (n - 1)) / n
-    for i, (label, val, accent) in enumerate(items):
-        x = i * (w + gap)
-        ax.add_patch(Rectangle((x, 0), w, 1, facecolor=CARD, edgecolor=BORDER,
-                               linewidth=1))
-        ax.add_patch(Rectangle((x, 0), 0.008, 1, color=accent))
-        ax.text(x + 0.02, 0.66, label, fontsize=8.5, color=SLATE,
-                fontweight="bold")
-        ax.text(x + 0.02, 0.26, val, fontsize=13.5, color=NAVY,
-                fontweight="bold")
-
-
-def _summary(pdf, d, npages):
+def _summary(pdf, d, page, npages):
     fig = _new_slide()
     _title(fig, "Executive Summary")
 
@@ -137,7 +177,6 @@ def _summary(pdf, d, npages):
         items.append((label, f"${val:,.0f}", CAT_COLORS[i % len(CAT_COLORS)]))
     _tiles(fig, [0.04, 0.62, 0.92, 0.2], items)
 
-    # budget bar chart
     ax = fig.add_axes([0.08, 0.12, 0.84, 0.4])
     cats = list(totals.keys())
     vals = list(totals.values())
@@ -159,12 +198,12 @@ def _summary(pdf, d, npages):
                 ha="center", va="bottom", fontsize=8, color=NAVY,
                 fontweight="bold")
 
-    _footer(fig, 2, npages)
+    _footer(fig, page, npages)
     pdf.savefig(fig, facecolor=fig.get_facecolor())
     plt.close(fig)
 
 
-def _status_eta(pdf, d, npages):
+def _status_eta(pdf, d, page, npages):
     fig = _new_slide()
     _title(fig, "Procurement Status & Delivery Times")
 
@@ -205,12 +244,12 @@ def _status_eta(pdf, d, npages):
                           "(después de Status y antes de Comments)",
                 ha="center", va="center", color=SLATE, fontsize=12)
 
-    _footer(fig, 3, npages)
+    _footer(fig, page, npages)
     pdf.savefig(fig, facecolor=fig.get_facecolor())
     plt.close(fig)
 
 
-def _top_costs(pdf, d, npages):
+def _top_costs(pdf, d, page, npages):
     fig = _new_slide()
     _title(fig, "Top 10 Cost Items")
 
@@ -231,43 +270,113 @@ def _top_costs(pdf, d, npages):
                 f"${row.get('Total Cost USD', 0):,.0f}",
                 _truncate(row.get("Status", "") or "—", 14),
             ])
-        table = ax.table(cellText=cell_text, colLabels=cols,
-                         cellLoc="left", loc="center",
+        table = ax.table(cellText=cell_text, colLabels=cols, cellLoc="left",
+                         loc="center",
                          colWidths=[0.05, 0.42, 0.19, 0.17, 0.17])
         table.auto_set_font_size(False)
         table.set_fontsize(9.5)
         table.scale(1, 1.9)
-        for (r, c), cell in table.get_celld().items():
-            cell.set_edgecolor(BORDER)
-            if r == 0:
-                cell.set_facecolor(NAVY)
-                cell.set_text_props(color=WHITE, fontweight="bold")
-            else:
-                cell.set_facecolor(CARD if r % 2 else WHITE)
-                cell.set_text_props(color=NAVY)
+        _style_table(table, status_col=4, cell_text=cell_text)
 
-    _footer(fig, 4, npages)
+    _footer(fig, page, npages)
     pdf.savefig(fig, facecolor=fig.get_facecolor())
     plt.close(fig)
+
+
+def _detail_value(name, value):
+    if name == "Total Cost USD":
+        try:
+            return f"${float(value):,.0f}"
+        except (ValueError, TypeError):
+            return str(value)
+    if name == "Qty":
+        try:
+            return f"{float(value):g}"
+        except (ValueError, TypeError):
+            return _truncate(value, 8)
+    if name == "Description":
+        return _truncate(value, 44)
+    if name == "Supplier":
+        return _truncate(value, 20)
+    if name == "Status":
+        s = str(value).strip()
+        return s if s else "—"
+    return _truncate(value, 16)
+
+
+def _category_slides(pdf, title, df, page, npages):
+    """Render one (or more) detail-table slides for a single category."""
+    cols, widths = [], []
+    for name, w in DETAIL_COLS:
+        real = _find(df, name)
+        if real is not None:
+            cols.append((name, real))
+            widths.append(w)
+    total_w = sum(widths)
+    widths = [w / total_w for w in widths]
+
+    header = [c[0] for c in cols]
+    status_col = header.index("Status") if "Status" in header else None
+    n_pages = max(1, math.ceil(len(df) / ROWS_PER_PAGE))
+
+    for p in range(n_pages):
+        sub = df.iloc[p * ROWS_PER_PAGE:(p + 1) * ROWS_PER_PAGE]
+        fig = _new_slide()
+        suffix = f"  ({p + 1}/{n_pages})" if n_pages > 1 else ""
+        _title(fig, f"Detail · {title}{suffix}")
+
+        ax = fig.add_axes([0.03, 0.05, 0.94, 0.80])
+        ax.axis("off")
+
+        cell_text = [[_detail_value(name, row.get(real, "")) for name, real in cols]
+                     for _, row in sub.iterrows()]
+
+        table = ax.table(cellText=cell_text, colLabels=header, cellLoc="left",
+                         loc="upper center", colWidths=widths)
+        table.auto_set_font_size(False)
+        table.set_fontsize(8.5)
+        table.scale(1, 1.5)
+        _style_table(table, status_col=status_col, cell_text=cell_text)
+
+        _footer(fig, page, npages)
+        pdf.savefig(fig, facecolor=fig.get_facecolor())
+        plt.close(fig)
+        page += 1
+
+    return page
 
 
 # ---------------------------------------------------------------------------
 # PUBLIC
 # ---------------------------------------------------------------------------
+def _count_pages(d):
+    n = 4  # cover, summary, status+eta, top costs
+    for df in d.get("details", {}).values():
+        if df is not None and not df.empty:
+            n += max(1, math.ceil(len(df) / ROWS_PER_PAGE))
+    return n
+
+
 def build_report_pdf(d):
     """Build the report and return it as PDF bytes.
 
     `d` keys: totals(dict), total_all, budget, delta, status(dict),
-    top_eta(DataFrame|None), top_cost(DataFrame|None), logo(path|None).
+    top_eta(DataFrame|None), top_cost(DataFrame|None), logo(path|None),
+    details(dict label -> DataFrame, optional).
     """
     from matplotlib.backends.backend_pdf import PdfPages
 
     buf = io.BytesIO()
-    npages = 4
+    npages = _count_pages(d)
+    page = 1
     with PdfPages(buf) as pdf:
-        _cover(pdf, d, npages)
-        _summary(pdf, d, npages)
-        _status_eta(pdf, d, npages)
-        _top_costs(pdf, d, npages)
+        _cover(pdf, d, page, npages); page += 1
+        _summary(pdf, d, page, npages); page += 1
+        _status_eta(pdf, d, page, npages); page += 1
+        _top_costs(pdf, d, page, npages); page += 1
+        for label, df in d.get("details", {}).items():
+            if df is None or df.empty:
+                continue
+            page = _category_slides(pdf, label, df, page, npages)
     buf.seek(0)
     return buf.getvalue()

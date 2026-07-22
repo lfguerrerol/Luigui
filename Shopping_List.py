@@ -400,6 +400,7 @@ with exp_r:
             "top_eta": top10_eta,
             "top_cost": top10_cost,
             "logo": logo_path,
+            "details": data,
         })
         st.download_button(
             "⬇️ Exportar reporte PDF",
