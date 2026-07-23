@@ -106,6 +106,9 @@ fba_arbitrage/
 
 ## 🔌 Conectar datos reales (APIs)
 
+> 📘 Guía paso a paso de dónde sacar cada clave y cómo llenarla:
+> [`docs/CONFIGURAR_API.md`](docs/CONFIGURAR_API.md)
+
 ### Forma recomendada: archivo `.env`
 
 ```bash
