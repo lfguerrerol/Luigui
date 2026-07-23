@@ -1,71 +1,103 @@
 """
 Retailer connectors.
 
-Live integration points (set the env var to enable a real client):
-  - Walmart      -> WALMART_API_KEY        (Walmart Affiliate / Marketplace API)
-  - Target       -> TARGET_API_KEY         (RedCircle / partner feed)
-  - Home Depot   -> HOMEDEPOT_API_KEY       (partner product feed)
-  - Costco       -> COSTCO_API_KEY
-  - Sam's Club   -> SAMSCLUB_API_KEY
+Live data sources, in order of preference per store:
+  - Walmart     -> official Walmart.io API (walmart_client) if configured,
+                   else SerpApi walmart engine, else sample.
+  - Home Depot  -> SerpApi home_depot engine, else sample.
+  - Target      -> SerpApi google_shopping (filtered by store), else sample.
+  - Costco      -> SerpApi google_shopping (filtered by store), else sample.
+  - Sam's Club  -> SerpApi google_shopping (filtered by store), else sample.
 
-Without a key each connector serves the deterministic sample catalog so the
-pipeline works out of the box. To go live, implement `_fetch_live()`.
+Only Walmart has an official public API; the others have none, so they are
+sourced through a data aggregator (SerpApi). Any live error falls back to the
+sample catalog so a scan never crashes.
 """
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from .base import RetailerConnector
 from ..models import RetailProduct
 from ..sample_data import SAMPLE_CATALOG
+from . import walmart_client
+from . import serpapi_client
 
 
-class _SampleBackedRetailer(RetailerConnector):
+class _BaseRetailer(RetailerConnector):
     def _sample(self, limit: int) -> List[RetailProduct]:
-        items = [
-            entry["product"]
-            for entry in SAMPLE_CATALOG
-            if entry["product"].source == self.name
-        ]
+        items = [e["product"] for e in SAMPLE_CATALOG if e["product"].source == self.name]
         return items[:limit]
 
-    def _fetch_live(self, limit: int) -> List[RetailProduct]:
-        # Hook for a real API client. Raise so we fall back to sample data
-        # until a live client is implemented.
-        raise NotImplementedError(f"Live client for {self.name} not implemented")
+    def _live(self, limit: int) -> List[RetailProduct]:
+        """Override in subclasses. Return [] when no live source is available."""
+        return []
+
+    def is_live(self) -> bool:
+        return False
+
+    # keep the config endpoint working (it reads has_api_key)
+    @property
+    def has_api_key(self) -> bool:
+        return self.is_live()
 
     def fetch_deals(self, limit: int = 50) -> List[RetailProduct]:
-        if self.has_api_key:
+        if self.is_live():
             try:
-                return self._fetch_live(limit)
-            except NotImplementedError:
-                pass
+                live = self._live(limit)
+                if live:
+                    return live
+            except Exception as exc:  # network / API / parse
+                logging.warning("%s live fetch failed, using sample: %s", self.name, exc)
         return self._sample(limit)
 
 
-class WalmartConnector(_SampleBackedRetailer):
+class WalmartConnector(_BaseRetailer):
     name = "Walmart"
-    env_key = "WALMART_API_KEY"
+    env_key = "WALMART_CONSUMER_ID / SERPAPI_KEY"
+
+    def is_live(self) -> bool:
+        return walmart_client.is_configured() or serpapi_client.is_configured()
+
+    def _live(self, limit: int) -> List[RetailProduct]:
+        if walmart_client.is_configured():      # official API preferred
+            return walmart_client.fetch_deals(limit)
+        return serpapi_client.fetch_for_store("Walmart", limit)
 
 
-class TargetConnector(_SampleBackedRetailer):
-    name = "Target"
-    env_key = "TARGET_API_KEY"
-
-
-class HomeDepotConnector(_SampleBackedRetailer):
+class HomeDepotConnector(_BaseRetailer):
     name = "Home Depot"
-    env_key = "HOMEDEPOT_API_KEY"
+    env_key = "SERPAPI_KEY"
+
+    def is_live(self) -> bool:
+        return serpapi_client.is_configured()
+
+    def _live(self, limit: int) -> List[RetailProduct]:
+        return serpapi_client.fetch_for_store("Home Depot", limit)
 
 
-class CostcoConnector(_SampleBackedRetailer):
+class _GoogleShoppingRetailer(_BaseRetailer):
+    """Stores with no API at all: sourced via SerpApi's Google Shopping engine."""
+    env_key = "SERPAPI_KEY"
+
+    def is_live(self) -> bool:
+        return serpapi_client.is_configured()
+
+    def _live(self, limit: int) -> List[RetailProduct]:
+        return serpapi_client.fetch_for_store(self.name, limit)
+
+
+class TargetConnector(_GoogleShoppingRetailer):
+    name = "Target"
+
+
+class CostcoConnector(_GoogleShoppingRetailer):
     name = "Costco"
-    env_key = "COSTCO_API_KEY"
 
 
-class SamsClubConnector(_SampleBackedRetailer):
+class SamsClubConnector(_GoogleShoppingRetailer):
     name = "Sam's Club"
-    env_key = "SAMSCLUB_API_KEY"
 
 
 ALL_RETAILERS = [

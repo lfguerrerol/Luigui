@@ -57,21 +57,39 @@ class KeepaConnector(AnalyticsConnector):
             return None
 
 
-class Helium10Connector(AnalyticsConnector):
-    name = "Helium10"
-    env_key = "HELIUM10_API_KEY"
+class _SalesEnricher(AnalyticsConnector):
+    """
+    Base for analytics providers that refine the *sales estimate* of an insight
+    that already carries a price/rank (from Keepa or the sample catalog). They
+    are ASIN-keyed and do not return a Buy Box price, so they are not standalone
+    price providers. Subclasses implement _fetch_units().
+    """
+    tag = ""  # provider label suffix, e.g. "JungleScout"
 
     def lookup(self, product: RetailProduct) -> Optional[AmazonInsight]:
-        raise NotImplementedError("Live Helium 10 client not implemented")
+        return None  # not a price provider
+
+    def _fetch_units(self, insight: AmazonInsight) -> Optional[int]:
+        raise NotImplementedError
+
+    def enrich_sales(self, insight: AmazonInsight) -> AmazonInsight:
+        try:
+            units = self._fetch_units(insight)
+        except Exception as exc:  # API/network/parse
+            logging.warning("%s enrich failed for %s: %s", self.name, insight.asin, exc)
+            return insight
+        if units:
+            return insight.model_copy(update={
+                "est_monthly_sales": units,
+                "provider": f"{insight.provider}+{self.tag}",
+            })
+        return insight
 
 
-class JungleScoutConnector(AnalyticsConnector):
-    """
-    Jungle Scout is used as a *sales-estimate refiner*, not a standalone price
-    source: its API returns units-sold for an ASIN but not a Buy Box price. It
-    needs both an API key and a paired key name, so we override has_api_key.
-    """
+class JungleScoutConnector(_SalesEnricher):
+    """Needs both an API key and a paired key name, so has_api_key is overridden."""
     name = "JungleScout"
+    tag = "JungleScout"
     env_key = "JUNGLESCOUT_API_KEY"
 
     @property
@@ -79,58 +97,49 @@ class JungleScoutConnector(AnalyticsConnector):
         import os
         return bool(os.getenv("JUNGLESCOUT_API_KEY") and os.getenv("JUNGLESCOUT_KEY_NAME"))
 
-    def lookup(self, product: RetailProduct) -> Optional[AmazonInsight]:
-        # Not a full provider (no price). Enrichment happens in enrich_sales().
-        return None
-
-    def enrich_sales(self, insight: AmazonInsight) -> AmazonInsight:
-        """Override est_monthly_sales with Jungle Scout's estimate when possible."""
+    def _fetch_units(self, insight: AmazonInsight) -> Optional[int]:
         from . import junglescout_client as js
-        try:
-            units = js.monthly_sales_for_asin(insight.asin)
-        except js.JungleScoutAPIError as exc:
-            logging.warning("Jungle Scout API error for %s: %s", insight.asin, exc)
-            return insight
-        except Exception as exc:
-            logging.warning("Jungle Scout lookup failed for %s: %s", insight.asin, exc)
-            return insight
-        if units:
-            return insight.model_copy(update={
-                "est_monthly_sales": units,
-                "provider": f"{insight.provider}+JungleScout",
-            })
-        return insight
+        return js.monthly_sales_for_asin(insight.asin)
 
 
-class SellerAmpConnector(AnalyticsConnector):
+class Helium10Connector(_SalesEnricher):
+    name = "Helium10"
+    tag = "Helium10"
+    env_key = "HELIUM10_API_KEY"
+
+    def _fetch_units(self, insight: AmazonInsight) -> Optional[int]:
+        from . import helium10_client as h10
+        return h10.monthly_sales_for_asin(insight.asin)
+
+
+class SellerAmpConnector(_SalesEnricher):
     name = "SellerAmp"
+    tag = "SellerAmp"
     env_key = "SELLERAMP_API_KEY"
 
-    def lookup(self, product: RetailProduct) -> Optional[AmazonInsight]:
-        raise NotImplementedError("Live SellerAmp client not implemented")
+    def _fetch_units(self, insight: AmazonInsight) -> Optional[int]:
+        from . import selleramp_client as sas
+        return sas.monthly_sales_for_insight(insight.asin, sale_price=insight.amazon_price)
 
 
-# Preferred order of live providers; first one with a working lookup wins,
-# then we fall back to the sample provider.
-_JUNGLESCOUT = JungleScoutConnector()
+# Keepa is the live price/rank backbone; the sample catalog is the fallback.
+_PRICE_PROVIDERS = [KeepaConnector()]
 
-# Providers that can return a full insight (price + rank). First hit wins,
-# then the sample catalog. Jungle Scout is applied afterwards as an enricher.
-_LIVE_PROVIDERS = [
-    KeepaConnector(),
-    Helium10Connector(),
-    _JUNGLESCOUT,
-    SellerAmpConnector(),
-]
-_PRICE_PROVIDERS = [KeepaConnector(), Helium10Connector(), SellerAmpConnector()]
+# Sales-estimate enrichers, in order of preference. The first one with a
+# configured key refines the base insight's monthly sales.
+_ENRICHERS = [JungleScoutConnector(), Helium10Connector(), SellerAmpConnector()]
+
+# All live providers, for the /api/config status display.
+_LIVE_PROVIDERS = [KeepaConnector()] + _ENRICHERS
 _SAMPLE = SampleAnalytics()
 
 
 def resolve_insight(product: RetailProduct) -> Optional[AmazonInsight]:
     """
     Resolve a retail product to an Amazon insight:
-      1. price/rank from the first live price provider with a key, else sample;
-      2. refine the sales estimate with Jungle Scout when its key is set.
+      1. price/rank from a live price provider (Keepa) with a key, else sample;
+      2. refine the sales estimate with the first configured enricher
+         (Jungle Scout -> Helium 10 -> SellerAmp).
     """
     base: Optional[AmazonInsight] = None
     for provider in _PRICE_PROVIDERS:
@@ -146,8 +155,10 @@ def resolve_insight(product: RetailProduct) -> Optional[AmazonInsight]:
     if base is None:
         return None
 
-    if _JUNGLESCOUT.has_api_key:
-        base = _JUNGLESCOUT.enrich_sales(base)
+    for enricher in _ENRICHERS:
+        if enricher.has_api_key:
+            base = enricher.enrich_sales(base)
+            break  # one authoritative sales source is enough
     return base
 
 
