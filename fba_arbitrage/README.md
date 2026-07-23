@@ -73,7 +73,10 @@ fba_arbitrage/
 │       ├── retailers.py       # Walmart, Target, Home Depot, Costco, Sam's
 │       ├── analytics.py       # Keepa, Helium 10, Jungle Scout, SellerAmp
 │       ├── keepa_client.py    # cliente EN VIVO de Keepa (precio, rank, ventas)
-│       └── junglescout_client.py  # cliente EN VIVO de Jungle Scout (estimación de ventas)
+│       ├── junglescout_client.py  # cliente EN VIVO de Jungle Scout (ventas)
+│       ├── walmart_client.py  # cliente EN VIVO de Walmart.io (firma RSA)
+│       ├── serpapi_client.py  # tiendas sin API oficial vía SerpApi
+│       └── category_map.py    # mapea categorías de tienda -> categorías FBA
 └── frontend/
     ├── index.html             # dashboard React (sin build)
     └── vendor/                # React + Babel locales (funciona offline, sin CDN)
@@ -99,11 +102,16 @@ usa el catálogo de muestra automáticamente.
 
 ```bash
 # Tiendas
-export WALMART_API_KEY=...        # Walmart Affiliate / Marketplace API
-export TARGET_API_KEY=...         # RedCircle u otro feed
-export HOMEDEPOT_API_KEY=...
-export COSTCO_API_KEY=...
-export SAMSCLUB_API_KEY=...
+# Walmart (API OFICIAL, ya implementada — firma RSA)
+export WALMART_CONSUMER_ID=...        # tu Consumer ID de walmart.io
+export WALMART_PRIVATE_KEY_FILE=...   # ruta al PEM de tu clave privada RSA
+#   (o WALMART_PRIVATE_KEY con el PEM en línea)
+export WALMART_KEY_VERSION=1          # opcional (default 1)
+export WALMART_QUERIES="clearance,rollback"  # opcional: términos a buscar
+
+# Home Depot / Target / Costco / Sam's (SIN API oficial -> vía agregador SerpApi)
+export SERPAPI_KEY=...                # https://serpapi.com
+export SERPAPI_QUERIES="clearance,open box"  # opcional
 
 # Análisis de Amazon
 export KEEPA_API_KEY=...          # ✅ YA IMPLEMENTADO (en vivo)
@@ -134,9 +142,31 @@ vendedores y si Amazon vende en el listado. Si una consulta falla (sin tokens,
 red, etc.) cae automáticamente a datos de muestra sin romper el escaneo.
 Implementación: `connectors/keepa_client.py`.
 
-Para los demás proveedores, implementa el método correspondiente:
-- Tiendas → `_fetch_live()` en `connectors/retailers.py`
-- Análisis → `lookup()` en `connectors/analytics.py` (usa `keepa_client.py` como modelo)
+### Tiendas en vivo (ya funcionan)
+
+Cascada por tienda (usa el primero disponible, si no cae a datos de muestra):
+
+| Tienda | Fuente en vivo | Notas |
+|--------|----------------|-------|
+| **Walmart** | API oficial `walmart.io` (firma RSA) → o SerpApi | Única con API oficial |
+| **Home Depot** | SerpApi (motor `home_depot`) | Sin API pública oficial |
+| **Target** | SerpApi (Google Shopping, filtrado por tienda) | Sin API pública oficial |
+| **Costco** | SerpApi (Google Shopping, filtrado por tienda) | Sin API pública oficial |
+| **Sam's Club** | SerpApi (Google Shopping, filtrado por tienda) | Sin API pública oficial |
+
+Implementación: `connectors/walmart_client.py` y `connectors/serpapi_client.py`.
+El mapeo de respuestas está centralizado en las funciones `parse_*`, así que
+puedes cambiar SerpApi por otro agregador (BlueCart, Rainforest, Traject Data)
+editando un solo lugar. El mapeo de categorías de cada tienda a las categorías
+de tarifas FBA está en `connectors/category_map.py`.
+
+> **Limitación honesta:** las tiendas sin API oficial se consultan vía un
+> agregador. Google Shopping no expone UPC, lo que dificulta el emparejamiento
+> automático con el listado de Amazon (Keepa empareja por UPC). Los motores de
+> Walmart y Home Depot sí devuelven identificadores más ricos.
+
+Para los proveedores de análisis restantes (Helium 10, SellerAmp), implementa
+`lookup()` en `connectors/analytics.py` usando `keepa_client.py` como modelo.
 
 La estructura de datos ya está definida en `models.py`, así que solo tienes que
 mapear la respuesta de cada API a `RetailProduct` / `AmazonInsight`.
