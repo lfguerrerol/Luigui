@@ -76,6 +76,8 @@ fba_arbitrage/
 │       ├── junglescout_client.py  # cliente EN VIVO de Jungle Scout (ventas)
 │       ├── walmart_client.py  # cliente EN VIVO de Walmart.io (firma RSA)
 │       ├── serpapi_client.py  # tiendas sin API oficial vía SerpApi
+│       ├── helium10_client.py # enriquecedor de ventas (contrato configurable)
+│       ├── selleramp_client.py# enriquecedor de ventas (contrato configurable)
 │       └── category_map.py    # mapea categorías de tienda -> categorías FBA
 └── frontend/
     ├── index.html             # dashboard React (sin build)
@@ -117,11 +119,13 @@ export SERPAPI_QUERIES="clearance,open box"  # opcional
 export KEEPA_API_KEY=...          # ✅ YA IMPLEMENTADO (en vivo)
 export KEEPA_DOMAIN=1             # opcional: 1=amazon.com, 2=.co.uk, 3=.de ...
 export KEEPA_MATCH_THRESHOLD=0.35 # opcional: similitud mínima de título (sin UPC)
-export HELIUM10_API_KEY=...       # estimación de ventas (stub)
-export JUNGLESCOUT_API_KEY=...    # ✅ YA IMPLEMENTADO (en vivo)
+export JUNGLESCOUT_API_KEY=...    # ✅ estimación de ventas (API pública)
 export JUNGLESCOUT_KEY_NAME=...   # nombre de clave que acompaña a la API key
 export JUNGLESCOUT_MARKETPLACE=us # opcional (default us)
-export SELLERAMP_API_KEY=...      # (stub)
+export HELIUM10_API_KEY=...       # ✅ implementado (contrato configurable, ver nota)
+export HELIUM10_API_URL=...       # opcional: URL real de tu endpoint Helium 10
+export SELLERAMP_API_KEY=...      # ✅ implementado (contrato configurable, ver nota)
+export SELLERAMP_API_URL=...      # opcional: URL real de tu endpoint SellerAmp
 ```
 
 ### Jungle Scout en vivo (ya funciona)
@@ -170,8 +174,21 @@ de tarifas FBA está en `connectors/category_map.py`.
 > `Keepa (título)`. Los motores de Walmart y Home Depot sí devuelven
 > identificadores más ricos y se emparejan por código.
 
-Para los proveedores de análisis restantes (Helium 10, SellerAmp), implementa
-`lookup()` en `connectors/analytics.py` usando `keepa_client.py` como modelo.
+### Enriquecedores de ventas: Jungle Scout, Helium 10, SellerAmp
+
+Keepa/muestra aportan precio + rank + rating; luego el **primer enriquecedor
+configurado** (en orden: Jungle Scout → Helium 10 → SellerAmp) reemplaza la
+estimación de ventas y etiqueta el proveedor (`Keepa+Helium10`, etc.). Solo se
+aplica uno (una fuente de ventas autoritativa basta).
+
+> **Nota honesta sobre Helium 10 y SellerAmp:** a diferencia de Keepa y Jungle
+> Scout (APIs públicas documentadas), Helium 10 y SellerAmp **no publican una
+> API abierta para suscriptores normales** (son de nivel enterprise/gated). Sus
+> clientes (`helium10_client.py`, `selleramp_client.py`) apuntan a un contrato
+> razonable con la **URL configurable** (`HELIUM10_API_URL`, `SELLERAMP_API_URL`)
+> y el **mapeo de respuesta centralizado** en `parse_units()`, para que ajustes
+> el endpoint y los campos a tu cuenta real sin tocar el resto del sistema. El
+> `parse_units` ya tolera varios nombres de campo comunes.
 
 La estructura de datos ya está definida en `models.py`, así que solo tienes que
 mapear la respuesta de cada API a `RetailProduct` / `AmazonInsight`.
