@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FBA Arbitrage Finder</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root {
+      --bg:#0f172a; --panel:#1e293b; --panel2:#273549; --line:#334155;
+      --text:#e2e8f0; --muted:#94a3b8; --accent:#22c55e; --accent2:#38bdf8;
+      --warn:#f59e0b; --bad:#ef4444;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+           background:var(--bg); color:var(--text); }
+    header { padding:18px 24px; background:linear-gradient(90deg,#065f46,#0e7490);
+             display:flex; align-items:center; justify-content:space-between; }
+    header h1 { margin:0; font-size:20px; }
+    header .sub { color:#d1fae5; font-size:13px; }
+    .wrap { max-width:1280px; margin:0 auto; padding:20px; }
+    .banner { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+              padding:10px 14px; margin-bottom:16px; font-size:13px; color:var(--muted); }
+    .banner b { color:var(--accent2); }
+    .layout { display:grid; grid-template-columns:300px 1fr; gap:18px; }
+    @media(max-width:900px){ .layout{ grid-template-columns:1fr; } }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .panel h2 { margin:0 0 12px; font-size:15px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+    input, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+                    background:var(--panel2); color:var(--text); font-size:14px; }
+    .goal-input { border-color:var(--accent); font-weight:600; }
+    button { width:100%; margin-top:16px; padding:11px; border:none; border-radius:8px;
+             background:var(--accent); color:#03210f; font-weight:700; font-size:15px; cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    button.ghost { background:var(--panel2); color:var(--text); border:1px solid var(--line); margin-top:8px; }
+    .cards { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+    @media(max-width:900px){ .cards{ grid-template-columns:repeat(2,1fr);} }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+    .card .k { font-size:12px; color:var(--muted); }
+    .card .v { font-size:24px; font-weight:800; margin-top:4px; }
+    .goal-card.ok .v { color:var(--accent); }
+    .goal-card.no .v { color:var(--warn); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; }
+    tr.rec { background:rgba(34,197,94,0.06); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+    .pos { color:var(--accent); } .neg { color:var(--bad); }
+    .badge { font-size:10px; padding:2px 6px; border-radius:6px; background:var(--panel2); color:var(--muted); }
+    .tag-src { background:#1d4ed8; color:#dbeafe; }
+    .note { font-size:11px; color:var(--warn); }
+    a { color:var(--accent2); text-decoration:none; }
+    .tabs { display:flex; gap:8px; margin-bottom:14px; }
+    .tab { padding:8px 14px; border-radius:8px; background:var(--panel); border:1px solid var(--line);
+           cursor:pointer; font-size:13px; }
+    .tab.active { background:var(--accent); color:#03210f; font-weight:700; border-color:var(--accent); }
+    .muted { color:var(--muted); font-size:12px; }
+    .calc-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const API = "";  // same origin
+    const money = n => n==null ? "—" : "$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const pct = n => n==null ? "—" : Number(n).toFixed(1)+"%";
+
+    function Field({label, ...p}) {
+      return <div><label>{label}</label><input {...p}/></div>;
+    }
+
+    function ScanTab() {
+      const [f, setF] = useState({
+        monthly_profit_goal:1000, min_margin_pct:15, min_roi_pct:0,
+        min_net_profit:2, min_monthly_sales:0, min_rating:0,
+        max_offer_count:999, capture_rate:0.30, exclude_amazon_seller:true,
+        retailers:[], categories:[],
+      });
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [cfg, setCfg] = useState(null);
+      const set = (k,v) => setF(s=>({...s,[k]:v}));
+
+      useEffect(()=>{ fetch(API+"/api/config").then(r=>r.json()).then(setCfg); },[]);
+      const run = () => {
+        setLoading(true);
+        fetch(API+"/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(f)}).then(r=>r.json()).then(d=>{setData(d);setLoading(false);});
+      };
+      useEffect(()=>{ run(); },[]);
+
+      const recIds = new Set((data?.recommended_sourcing||[]).map(d=>d.id));
+
+      return (
+        <div>
+          {cfg && cfg.using_sample_data &&
+            <div className="banner">⚙️ Corriendo con <b>datos de muestra</b>. Para datos reales, configura las claves API
+             (KEEPA_API_KEY, WALMART_API_KEY, HELIUM10_API_KEY, etc.) como variables de entorno.</div>}
+
+          <div className="layout">
+            <div className="panel">
+              <h2>🎯 Filtros de sourcing</h2>
+              <label>Meta de ganancia mensual (USD)</label>
+              <input className="goal-input" type="number" value={f.monthly_profit_goal}
+                     onChange={e=>set("monthly_profit_goal",+e.target.value)} />
+              <label>Margen mínimo (%)</label>
+              <input type="number" value={f.min_margin_pct} onChange={e=>set("min_margin_pct",+e.target.value)} />
+              <label>ROI mínimo (%)</label>
+              <input type="number" value={f.min_roi_pct} onChange={e=>set("min_roi_pct",+e.target.value)} />
+              <label>Ganancia mínima por unidad (USD)</label>
+              <input type="number" value={f.min_net_profit} onChange={e=>set("min_net_profit",+e.target.value)} />
+              <label>Ventas mensuales mínimas (listado)</label>
+              <input type="number" value={f.min_monthly_sales} onChange={e=>set("min_monthly_sales",+e.target.value)} />
+              <label>Rating mínimo (estrellas)</label>
+              <input type="number" step="0.1" value={f.min_rating} onChange={e=>set("min_rating",+e.target.value)} />
+              <label>% de ventas que capturas (0-1)</label>
+              <input type="number" step="0.05" value={f.capture_rate} onChange={e=>set("capture_rate",+e.target.value)} />
+              <label>Categoría</label>
+              <select value={f.categories[0]||""} onChange={e=>set("categories", e.target.value?[e.target.value]:[])}>
+                <option value="">Todas</option>
+                {cfg && cfg.categories.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+              <label style={{marginTop:12}}>
+                <input type="checkbox" style={{width:"auto",marginRight:6}} checked={f.exclude_amazon_seller}
+                  onChange={e=>set("exclude_amazon_seller",e.target.checked)} />
+                Excluir listados donde Amazon vende
+              </label>
+              <button onClick={run}>{loading?"Buscando…":"🔍 Buscar ofertas"}</button>
+            </div>
+
+            <div>
+              {data && <>
+                <div className="cards">
+                  <div className="card"><div className="k">Candidatos</div><div className="v">{data.total_candidates}</div></div>
+                  <div className="card"><div className="k">Califican</div><div className="v">{data.qualified}</div></div>
+                  <div className={"card goal-card "+(data.goal_reached?"ok":"no")}>
+                    <div className="k">Meta ${data.monthly_profit_goal}/mes</div>
+                    <div className="v">{data.goal_reached?"✓ Alcanzada":"✗ Falta"}</div></div>
+                  <div className="card"><div className="k">Ganancia proyectada/mes</div>
+                    <div className="v">{money(data.projected_portfolio_profit)}</div></div>
+                </div>
+
+                <div className="panel" style={{marginBottom:16}}>
+                  <h2>📦 Lista de sourcing recomendada <span className="muted">(alcanza tu meta)</span></h2>
+                  {data.recommended_sourcing.length===0 && <div className="muted">Ningún producto califica con estos filtros.</div>}
+                  {data.recommended_sourcing.length>0 &&
+                    <div className="muted">Compra estos {data.recommended_sourcing.length} productos para proyectar
+                     ~{money(data.recommended_sourcing.reduce((s,d)=>s+(d.projected_monthly_profit||0),0))}/mes.</div>}
+                </div>
+
+                <div className="panel">
+                  <h2>Ofertas calificadas</h2>
+                  <div style={{overflowX:"auto"}}>
+                  <table>
+                    <thead><tr>
+                      <th>Producto</th><th>Tienda</th><th>Compra</th><th>Amazon</th>
+                      <th>Ganancia/u</th><th>Margen</th><th>ROI</th><th>Ventas/mes</th>
+                      <th>Proy./mes</th><th>Uds. p/meta</th>
+                    </tr></thead>
+                    <tbody>
+                    {data.deals.map(d=>(
+                      <tr key={d.id} className={recIds.has(d.id)?"rec":""}>
+                        <td style={{maxWidth:220}}>
+                          {recIds.has(d.id) && <span className="pill" style={{background:"var(--accent)",color:"#03210f",marginRight:6}}>★</span>}
+                          <a href={d.product.url} target="_blank">{d.product.title}</a>
+                          <div className="badge">{d.product.category}</div>
+                          {d.notes.map((n,i)=><div key={i} className="note">⚠ {n}</div>)}
+                        </td>
+                        <td><span className="badge tag-src">{d.product.source}</span>
+                            <div className="muted">-{d.product.discount_pct||"?"}%</div></td>
+                        <td>{money(d.buy_cost)}</td>
+                        <td>{money(d.insight.amazon_price)}<div className="muted">{d.insight.provider}</div></td>
+                        <td className={d.net_profit>=0?"pos":"neg"}><b>{money(d.net_profit)}</b></td>
+                        <td className={d.margin_pct>=f.min_margin_pct?"pos":""}>{pct(d.margin_pct)}</td>
+                        <td>{pct(d.roi_pct)}</td>
+                        <td>{d.est_monthly_sales||"—"}<div className="muted">rank {d.insight.sales_rank||"—"}</div></td>
+                        <td className="pos"><b>{money(d.projected_monthly_profit)}</b>
+                            <div className="muted">{d.projected_monthly_units} uds</div></td>
+                        <td>{d.units_needed_for_goal||"—"}</td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                  </div>
+                </div>
+              </>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function CalcTab() {
+      const [i,setI] = useState({buy_price:59,amazon_price:109.99,category:"home_kitchen",
+        weight_lb:8,est_monthly_sales:2100,monthly_profit_goal:1000,capture_rate:0.30,
+        sales_tax_pct:0,inbound_shipping_per_unit:0.5,prep_cost_per_unit:0.3});
+      const [out,setOut] = useState(null);
+      const set=(k,v)=>setI(s=>({...s,[k]:v}));
+      const run=()=>fetch(API+"/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(i)}).then(r=>r.json()).then(setOut);
+      useEffect(()=>{run();},[]);
+      return (
+        <div className="layout">
+          <div className="panel">
+            <h2>🧮 Calculadora manual</h2>
+            <div className="calc-grid">
+              <Field label="Precio de compra" type="number" value={i.buy_price} onChange={e=>set("buy_price",+e.target.value)}/>
+              <Field label="Precio en Amazon" type="number" value={i.amazon_price} onChange={e=>set("amazon_price",+e.target.value)}/>
+              <Field label="Peso (lb)" type="number" value={i.weight_lb} onChange={e=>set("weight_lb",+e.target.value)}/>
+              <Field label="Ventas/mes listado" type="number" value={i.est_monthly_sales} onChange={e=>set("est_monthly_sales",+e.target.value)}/>
+              <Field label="Meta mensual" type="number" value={i.monthly_profit_goal} onChange={e=>set("monthly_profit_goal",+e.target.value)}/>
+              <Field label="Captura (0-1)" type="number" step="0.05" value={i.capture_rate} onChange={e=>set("capture_rate",+e.target.value)}/>
+              <Field label="Impuesto compra (0-1)" type="number" step="0.01" value={i.sales_tax_pct} onChange={e=>set("sales_tax_pct",+e.target.value)}/>
+              <Field label="Envío inbound/u" type="number" step="0.1" value={i.inbound_shipping_per_unit} onChange={e=>set("inbound_shipping_per_unit",+e.target.value)}/>
+            </div>
+            <button onClick={run}>Calcular</button>
+          </div>
+          <div>
+            {out && <>
+              <div className="cards">
+                <div className="card"><div className="k">Ganancia/unidad</div>
+                  <div className={"v "+(out.result.net_profit>=0?"pos":"neg")}>{money(out.result.net_profit)}</div></div>
+                <div className="card"><div className="k">Margen</div><div className="v">{pct(out.result.margin_pct)}</div></div>
+                <div className="card"><div className="k">ROI</div><div className="v">{pct(out.result.roi_pct)}</div></div>
+                <div className={"card goal-card "+(out.goal_reached_by_listing?"ok":"no")}>
+                  <div className="k">¿Meta con 1 listado?</div>
+                  <div className="v">{out.goal_reached_by_listing?"✓ Sí":"✗ No"}</div></div>
+              </div>
+              <div className="panel">
+                <h2>Desglose de costos</h2>
+                <table><tbody>
+                  <tr><td>Costo de compra</td><td>{money(out.result.buy_cost)}</td></tr>
+                  <tr><td>Referral fee</td><td>{money(out.result.referral_fee)}</td></tr>
+                  <tr><td>Fulfillment fee</td><td>{money(out.result.fulfillment_fee)}</td></tr>
+                  <tr><td>Almacenamiento</td><td>{money(out.result.storage_fee)}</td></tr>
+                  <tr><td>Envío inbound + prep</td><td>{money(out.result.inbound_shipping+out.result.prep_cost)}</td></tr>
+                  <tr><td><b>Costo total</b></td><td><b>{money(out.result.total_cost)}</b></td></tr>
+                  <tr><td><b>Ganancia neta</b></td><td className={out.result.net_profit>=0?"pos":"neg"}><b>{money(out.result.net_profit)}</b></td></tr>
+                  <tr><td>Unidades/mes necesarias p/meta</td><td>{out.units_needed_for_goal||"—"}</td></tr>
+                  <tr><td>Ganancia proyectada/mes</td><td className="pos">{money(out.projected_monthly_profit)} ({out.projected_monthly_units} uds)</td></tr>
+                </tbody></table>
+              </div>
+            </>}
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [tab,setTab] = useState("scan");
+      return (
+        <div>
+          <header>
+            <div><h1>📈 FBA Arbitrage Finder</h1>
+              <div className="sub">Encuentra descuentos → revende en Amazon con ganancia</div></div>
+          </header>
+          <div className="wrap">
+            <div className="tabs">
+              <div className={"tab "+(tab==="scan"?"active":"")} onClick={()=>setTab("scan")}>🔍 Buscador de ofertas</div>
+              <div className={"tab "+(tab==="calc"?"active":"")} onClick={()=>setTab("calc")}>🧮 Calculadora</div>
+            </div>
+            {tab==="scan" ? <ScanTab/> : <CalcTab/>}
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
