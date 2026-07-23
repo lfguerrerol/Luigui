@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class RetailProduct(BaseModel):
@@ -20,6 +20,7 @@ class RetailProduct(BaseModel):
     dimensions_cuft: float = 0.10
     in_stock: bool = True
 
+    @computed_field
     @property
     def discount_pct(self) -> float:
         if not self.list_price:

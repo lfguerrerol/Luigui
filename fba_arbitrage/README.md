@@ -8,6 +8,16 @@ ganancia mensual** con el margen que definas.
 
 Funciona **sin claves API** usando un catálogo de muestra, para que puedas
 probarlo de inmediato. Cuando agregues las claves reales, cambia a datos en vivo.
+El dashboard también funciona **offline** (React/Babel vienen incluidos, sin CDN).
+
+### Dashboard
+
+- Barra de **progreso hacia la meta** mensual.
+- **Gráfica** de las mejores ofertas por ganancia proyectada/mes.
+- Tabla **ordenable** por cualquier columna (margen, ROI, ganancia, ventas…).
+- **Favoritos** persistentes (se guardan en el navegador) y filtro "solo favoritos".
+- **Exportar a CSV** las ofertas para tu lista de compras.
+- Pestaña **Calculadora** para analizar un producto manualmente.
 
 ---
 
@@ -65,7 +75,8 @@ fba_arbitrage/
 │       ├── keepa_client.py    # cliente EN VIVO de Keepa (precio, rank, ventas)
 │       └── junglescout_client.py  # cliente EN VIVO de Jungle Scout (estimación de ventas)
 └── frontend/
-    └── index.html             # dashboard React (vía CDN, sin build)
+    ├── index.html             # dashboard React (sin build)
+    └── vendor/                # React + Babel locales (funciona offline, sin CDN)
 ```
 
 ### Endpoints
