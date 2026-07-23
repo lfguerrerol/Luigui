@@ -12,6 +12,7 @@ catalog by UPC/SKU. Swap in a live provider by implementing `lookup()`.
 """
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 from .base import AnalyticsConnector
@@ -42,8 +43,18 @@ class KeepaConnector(AnalyticsConnector):
     env_key = "KEEPA_API_KEY"
 
     def lookup(self, product: RetailProduct) -> Optional[AmazonInsight]:
-        # Implement live Keepa product query here when KEEPA_API_KEY is set.
-        raise NotImplementedError("Live Keepa client not implemented")
+        # Live query. On any network/API/parse error we return None so the
+        # resolver falls back to the next provider (or the sample catalog),
+        # instead of crashing a whole scan because one lookup failed.
+        from . import keepa_client
+        try:
+            return keepa_client.lookup_product(product)
+        except keepa_client.KeepaAPIError as exc:
+            logging.warning("Keepa API error for %s: %s", product.source_sku, exc)
+            return None
+        except Exception as exc:  # network, JSON, etc.
+            logging.warning("Keepa lookup failed for %s: %s", product.source_sku, exc)
+            return None
 
 
 class Helium10Connector(AnalyticsConnector):

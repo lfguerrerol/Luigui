@@ -61,7 +61,8 @@ fba_arbitrage/
 │   └── connectors/
 │       ├── base.py            # interfaces de conectores
 │       ├── retailers.py       # Walmart, Target, Home Depot, Costco, Sam's
-│       └── analytics.py       # Keepa, Helium 10, Jungle Scout, SellerAmp
+│       ├── analytics.py       # Keepa, Helium 10, Jungle Scout, SellerAmp
+│       └── keepa_client.py    # cliente EN VIVO de Keepa (activo con KEEPA_API_KEY)
 └── frontend/
     └── index.html             # dashboard React (vía CDN, sin build)
 ```
@@ -93,15 +94,25 @@ export COSTCO_API_KEY=...
 export SAMSCLUB_API_KEY=...
 
 # Análisis de Amazon
-export KEEPA_API_KEY=...          # historial de precios, sales rank
-export HELIUM10_API_KEY=...       # estimación de ventas
-export JUNGLESCOUT_API_KEY=...
-export SELLERAMP_API_KEY=...
+export KEEPA_API_KEY=...          # ✅ YA IMPLEMENTADO (en vivo)
+export KEEPA_DOMAIN=1             # opcional: 1=amazon.com, 2=.co.uk, 3=.de ...
+export HELIUM10_API_KEY=...       # estimación de ventas (stub)
+export JUNGLESCOUT_API_KEY=...    # (stub)
+export SELLERAMP_API_KEY=...      # (stub)
 ```
 
-Para integrar una API real, implementa el método correspondiente:
+### Keepa en vivo (ya funciona)
+
+Con `KEEPA_API_KEY` configurada, el sistema consulta la API real de Keepa por
+UPC de cada producto y trae: precio Buy Box / New, sales rank, **ventas
+estimadas del mes** (`monthlySold`), rating, número de reseñas, cantidad de
+vendedores y si Amazon vende en el listado. Si una consulta falla (sin tokens,
+red, etc.) cae automáticamente a datos de muestra sin romper el escaneo.
+Implementación: `connectors/keepa_client.py`.
+
+Para los demás proveedores, implementa el método correspondiente:
 - Tiendas → `_fetch_live()` en `connectors/retailers.py`
-- Análisis → `lookup()` en `connectors/analytics.py`
+- Análisis → `lookup()` en `connectors/analytics.py` (usa `keepa_client.py` como modelo)
 
 La estructura de datos ya está definida en `models.py`, así que solo tienes que
 mapear la respuesta de cada API a `RetailProduct` / `AmazonInsight`.
