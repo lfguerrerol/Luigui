@@ -116,6 +116,7 @@ export SERPAPI_QUERIES="clearance,open box"  # opcional
 # Análisis de Amazon
 export KEEPA_API_KEY=...          # ✅ YA IMPLEMENTADO (en vivo)
 export KEEPA_DOMAIN=1             # opcional: 1=amazon.com, 2=.co.uk, 3=.de ...
+export KEEPA_MATCH_THRESHOLD=0.35 # opcional: similitud mínima de título (sin UPC)
 export HELIUM10_API_KEY=...       # estimación de ventas (stub)
 export JUNGLESCOUT_API_KEY=...    # ✅ YA IMPLEMENTADO (en vivo)
 export JUNGLESCOUT_KEY_NAME=...   # nombre de clave que acompaña a la API key
@@ -160,10 +161,14 @@ puedes cambiar SerpApi por otro agregador (BlueCart, Rainforest, Traject Data)
 editando un solo lugar. El mapeo de categorías de cada tienda a las categorías
 de tarifas FBA está en `connectors/category_map.py`.
 
-> **Limitación honesta:** las tiendas sin API oficial se consultan vía un
-> agregador. Google Shopping no expone UPC, lo que dificulta el emparejamiento
-> automático con el listado de Amazon (Keepa empareja por UPC). Los motores de
-> Walmart y Home Depot sí devuelven identificadores más ricos.
+> **Google Shopping y el emparejamiento sin UPC:** Google Shopping no expone
+> UPC. Para no perder esas ofertas (Target/Costco/Sam's), cuando un producto no
+> trae UPC el cliente de Keepa lo **busca por título** (endpoint `/search`) y
+> acepta el mejor resultado **solo si el título es suficientemente similar**
+> (similitud de tokens ≥ `KEEPA_MATCH_THRESHOLD`, default 0.35), para evitar
+> emparejar con el listado equivocado. Estos matches se etiquetan como
+> `Keepa (título)`. Los motores de Walmart y Home Depot sí devuelven
+> identificadores más ricos y se emparejan por código.
 
 Para los proveedores de análisis restantes (Helium 10, SellerAmp), implementa
 `lookup()` en `connectors/analytics.py` usando `keepa_client.py` como modelo.

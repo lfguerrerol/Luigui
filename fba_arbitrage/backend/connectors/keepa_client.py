@@ -18,13 +18,22 @@ Set KEEPA_API_KEY to enable. Optional: KEEPA_DOMAIN (default 1 = amazon.com).
 from __future__ import annotations
 
 import os
-from typing import Optional
+import re
+from typing import List, Optional
 
 import requests
 
 from ..models import RetailProduct, AmazonInsight
 
 KEEPA_BASE = "https://api.keepa.com"
+
+# Minimum title similarity (0-1) to accept a title-based match when there is no
+# UPC. Tunable via KEEPA_MATCH_THRESHOLD. Higher = stricter (fewer false matches).
+DEFAULT_MATCH_THRESHOLD = 0.35
+
+# Common noise words that shouldn't drive a product-title match.
+_STOPWORDS = {"the", "a", "an", "of", "for", "with", "and", "in", "to",
+              "new", "pack", "count", "ct", "oz", "size", "piece", "pieces"}
 
 # Keepa CSV type indices (subset we use).
 CSV_AMAZON = 0        # Amazon's own offer price
@@ -77,6 +86,46 @@ def fetch_product(api_key: str, asin: Optional[str] = None,
     return products[0] if products else None
 
 
+def _tokens(text: str | None) -> set:
+    if not text:
+        return set()
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return {w for w in words if w not in _STOPWORDS and len(w) > 1}
+
+
+def title_similarity(a: str | None, b: str | None) -> float:
+    """Jaccard overlap of normalized title tokens (0-1)."""
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def search_products(api_key: str, term: str, domain: int = 1,
+                    timeout: int = 20) -> List[dict]:
+    """Keepa /search by keyword/title. Returns candidate product dicts."""
+    if not term:
+        return []
+    params = {"key": api_key, "domain": domain, "type": "product",
+              "term": term, "stats": 90}
+    resp = requests.get(f"{KEEPA_BASE}/search", params=params, timeout=timeout)
+    if resp.status_code == 429:
+        raise KeepaAPIError("Keepa rate limit / out of tokens (HTTP 429)")
+    resp.raise_for_status()
+    return resp.json().get("products") or []
+
+
+def best_match_by_title(candidates: List[dict], title: str,
+                        threshold: float) -> Optional[dict]:
+    """Pick the candidate whose title is most similar, if above threshold."""
+    best, best_score = None, 0.0
+    for cand in candidates:
+        score = title_similarity(title, cand.get("title"))
+        if score > best_score:
+            best, best_score = cand, score
+    return best if best_score >= threshold else None
+
+
 def to_insight(product: dict, fallback_price: float = 0.0) -> Optional[AmazonInsight]:
     """Map a raw Keepa product dict onto our AmazonInsight model."""
     if not product:
@@ -120,14 +169,31 @@ def to_insight(product: dict, fallback_price: float = 0.0) -> Optional[AmazonIns
 
 
 def lookup_product(product: RetailProduct) -> Optional[AmazonInsight]:
-    """High-level: resolve a RetailProduct to a Keepa-backed AmazonInsight."""
+    """
+    Resolve a RetailProduct to a Keepa-backed AmazonInsight.
+
+    1. If the product has a UPC/EAN, match by code (exact, most reliable).
+    2. Otherwise — e.g. Google Shopping results (Target/Costco/Sam's) that carry
+       no UPC — search Keepa by title and accept the best match only if its
+       title is similar enough, so we don't attach the wrong Amazon listing.
+    """
     api_key = os.getenv("KEEPA_API_KEY")
     if not api_key:
         return None
     domain = int(os.getenv("KEEPA_DOMAIN", "1"))
 
-    # Prefer UPC/EAN lookup (works across retailers), fall back to any known ASIN.
-    raw = fetch_product(api_key, code=product.upc, domain=domain) if product.upc else None
-    if raw is None:
+    if product.upc:
+        raw = fetch_product(api_key, code=product.upc, domain=domain)
+        if raw:
+            return to_insight(raw, fallback_price=product.sale_price)
+
+    # No UPC (or UPC miss): fall back to title search with a similarity guard.
+    threshold = float(os.getenv("KEEPA_MATCH_THRESHOLD", str(DEFAULT_MATCH_THRESHOLD)))
+    candidates = search_products(api_key, product.title, domain=domain)
+    match = best_match_by_title(candidates, product.title, threshold)
+    if match is None:
         return None
-    return to_insight(raw, fallback_price=product.sale_price)
+    insight = to_insight(match, fallback_price=product.sale_price)
+    if insight:
+        insight.provider = "Keepa (título)"
+    return insight
