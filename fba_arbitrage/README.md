@@ -62,7 +62,8 @@ fba_arbitrage/
 │       ├── base.py            # interfaces de conectores
 │       ├── retailers.py       # Walmart, Target, Home Depot, Costco, Sam's
 │       ├── analytics.py       # Keepa, Helium 10, Jungle Scout, SellerAmp
-│       └── keepa_client.py    # cliente EN VIVO de Keepa (activo con KEEPA_API_KEY)
+│       ├── keepa_client.py    # cliente EN VIVO de Keepa (precio, rank, ventas)
+│       └── junglescout_client.py  # cliente EN VIVO de Jungle Scout (estimación de ventas)
 └── frontend/
     └── index.html             # dashboard React (vía CDN, sin build)
 ```
@@ -97,9 +98,21 @@ export SAMSCLUB_API_KEY=...
 export KEEPA_API_KEY=...          # ✅ YA IMPLEMENTADO (en vivo)
 export KEEPA_DOMAIN=1             # opcional: 1=amazon.com, 2=.co.uk, 3=.de ...
 export HELIUM10_API_KEY=...       # estimación de ventas (stub)
-export JUNGLESCOUT_API_KEY=...    # (stub)
+export JUNGLESCOUT_API_KEY=...    # ✅ YA IMPLEMENTADO (en vivo)
+export JUNGLESCOUT_KEY_NAME=...   # nombre de clave que acompaña a la API key
+export JUNGLESCOUT_MARKETPLACE=us # opcional (default us)
 export SELLERAMP_API_KEY=...      # (stub)
 ```
+
+### Jungle Scout en vivo (ya funciona)
+
+Jungle Scout se usa como **refinador de estimación de ventas**: su API devuelve
+unidades vendidas por día para un ASIN, pero no el precio. Por eso el flujo es:
+Keepa/muestra aportan precio + rank + rating (con el ASIN) y Jungle Scout
+**reemplaza `est_monthly_sales`** con su estimación (su especialidad), etiquetando
+el proveedor como `Keepa+JungleScout`. Necesita `JUNGLESCOUT_API_KEY` **y**
+`JUNGLESCOUT_KEY_NAME`. Si falla cae al valor previo sin romper el escaneo.
+Implementación: `connectors/junglescout_client.py`.
 
 ### Keepa en vivo (ya funciona)
 
