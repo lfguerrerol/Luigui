@@ -66,6 +66,7 @@ fba_arbitrage/
 ├── requirements.txt
 ├── backend/
 │   ├── main.py                # API FastAPI + sirve el frontend
+│   ├── env_loader.py          # carga las claves desde .env al arrancar
 │   ├── models.py              # modelos Pydantic (productos, ofertas, filtros)
 │   ├── fba_calculator.py      # tarifas FBA + motor de rentabilidad
 │   ├── engine.py              # escaneo + filtros + lista de sourcing
@@ -105,8 +106,25 @@ fba_arbitrage/
 
 ## 🔌 Conectar datos reales (APIs)
 
-Cada conector se activa poniendo su variable de entorno. Mientras no exista,
-usa el catálogo de muestra automáticamente.
+### Forma recomendada: archivo `.env`
+
+```bash
+cd fba_arbitrage
+cp .env.example .env      # copia la plantilla
+nano .env                 # pega tus claves reales (solo las que tengas)
+python run.py             # la app carga .env automáticamente
+```
+
+Luego abre **http://localhost:8020/api/config** y verifica que los conectores que
+configuraste muestren `"live": true`.
+
+> 🔒 **Seguridad:** `.env` está en `.gitignore` — **nunca** lo subas al repo ni
+> pegues tus claves en un chat/issue. La plantilla `.env.example` (sin secretos)
+> sí se versiona. Deja en blanco los conectores que no tengas: seguirán usando
+> datos de muestra.
+
+Cada conector se activa poniendo su variable. Alternativamente puedes exportarlas
+en tu shell en vez de usar `.env`:
 
 ```bash
 # Tiendas
