@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .models import ScanFilters, ScanResponse, AnalyzeRequest
 from . import engine
@@ -29,7 +30,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND = FRONTEND_DIR / "index.html"
+VENDOR_DIR = FRONTEND_DIR / "vendor"
+
+# Serve the locally-vendored React/Babel bundles (no external CDN needed).
+if VENDOR_DIR.exists():
+    app.mount("/vendor", StaticFiles(directory=str(VENDOR_DIR)), name="vendor")
 
 
 @app.get("/", response_class=HTMLResponse)
