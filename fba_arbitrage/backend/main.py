@@ -14,8 +14,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from fastapi import HTTPException
+
 from .models import ScanFilters, ScanResponse, AnalyzeRequest
 from . import engine
+from . import settings as settings_store
 from . import fba_calculator as calc
 from .connectors.retailers import ALL_RETAILERS
 from .connectors.analytics import active_providers, _LIVE_PROVIDERS
@@ -112,6 +115,27 @@ def analyze(req: AnalyzeRequest):
         "units_needed_for_goal": units_needed,
         "goal_reached_by_listing": (projected_profit >= req.monthly_profit_goal),
     }
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Current FBA fee settings (defaults merged with saved overrides)."""
+    return settings_store.current()
+
+
+@app.put("/api/settings")
+def put_settings(patch: dict):
+    """Apply and persist a partial settings update (validated)."""
+    try:
+        return settings_store.update(patch)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/settings/reset")
+def reset_settings():
+    """Discard all overrides and return to default fees."""
+    return settings_store.reset()
 
 
 @app.get("/api/health")
