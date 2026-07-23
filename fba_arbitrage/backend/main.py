@@ -9,6 +9,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Load .env before anything reads API keys from the environment.
+from . import env_loader  # noqa: F401
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
