@@ -81,22 +81,39 @@ class ProfitResult:
     breakdown: dict = field(default_factory=dict)
 
 
+def _settings() -> dict:
+    """Current fee settings (defaults + user overrides). Falls back to the
+    module constants if the settings store can't be read."""
+    try:
+        from . import settings
+        return settings.current()
+    except Exception:
+        return {
+            "referral_fee_pct": REFERRAL_FEE_PCT,
+            "referral_minimum": REFERRAL_MINIMUM,
+            "storage_fee_per_cuft": STORAGE_FEE_PER_CUFT,
+            "oversize_base_fee": OVERSIZE_BASE_FEE,
+        }
+
+
 def referral_fee(amazon_price: float, category: str) -> float:
-    pct = REFERRAL_FEE_PCT.get(category, REFERRAL_FEE_PCT["default"])
-    return max(amazon_price * pct, REFERRAL_MINIMUM)
+    s = _settings()
+    table = s["referral_fee_pct"]
+    pct = table.get(category, table["default"])
+    return max(amazon_price * pct, s["referral_minimum"])
 
 
 def fulfillment_fee(weight_lb: float) -> float:
     for max_w, fee in FULFILLMENT_FEE_TIERS:
         if weight_lb <= max_w:
             return fee
-    return OVERSIZE_BASE_FEE
+    return _settings()["oversize_base_fee"]
 
 
 def storage_fee(dimensions_cuft: float) -> float:
     # Charged monthly; we amortize one month per unit sold as a conservative
     # estimate (items that sell fast store <1 month, slow movers store more).
-    return round(dimensions_cuft * STORAGE_FEE_PER_CUFT, 2)
+    return round(dimensions_cuft * _settings()["storage_fee_per_cuft"], 2)
 
 
 def evaluate(inputs: CostInputs) -> ProfitResult:

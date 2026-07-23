@@ -25,12 +25,16 @@ def _deal_id(product: RetailProduct) -> str:
 
 def _build_deal(product: RetailProduct, insight: AmazonInsight,
                 filters: ScanFilters) -> Deal:
+    from . import settings as settings_store
+    s = settings_store.current()
     result = calc.evaluate(calc.CostInputs(
         buy_price=product.sale_price,
         amazon_price=insight.amazon_price,
         category=product.category,
         weight_lb=product.weight_lb,
         dimensions_cuft=product.dimensions_cuft,
+        inbound_shipping_per_unit=s["default_inbound_shipping"],
+        prep_cost_per_unit=s["default_prep_cost"],
     ))
 
     # Monthly projection: you only capture a slice of a listing's total sales,

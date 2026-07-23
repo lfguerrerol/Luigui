@@ -376,6 +376,65 @@
       );
     }
 
+    function SettingsTab() {
+      const [s, setS] = useState(null);
+      const [msg, setMsg] = useState("");
+      const load = () => fetch(API+"/api/settings").then(r=>r.json()).then(setS);
+      useEffect(()=>{ load(); },[]);
+      if (!s) return <div className="muted">Cargando…</div>;
+
+      const setNum = (k,v) => setS(o=>({...o,[k]:v}));
+      const setRef = (cat,v) => setS(o=>({...o, referral_fee_pct:{...o.referral_fee_pct,[cat]:v}}));
+      const save = () => {
+        // state already holds referral percentages as 0-1 fractions
+        const patch = {
+          referral_fee_pct: Object.fromEntries(Object.entries(s.referral_fee_pct).map(([c,v])=>[c, +v])),
+          referral_minimum:+s.referral_minimum, storage_fee_per_cuft:+s.storage_fee_per_cuft,
+          oversize_base_fee:+s.oversize_base_fee, default_inbound_shipping:+s.default_inbound_shipping,
+          default_prep_cost:+s.default_prep_cost,
+        };
+        fetch(API+"/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)})
+          .then(r=>r.json()).then(d=>{ setMsg("✓ Guardado"); setTimeout(()=>setMsg(""),2500); });
+      };
+      const reset = () => fetch(API+"/api/settings/reset",{method:"POST"}).then(r=>r.json()).then(d=>{setS(d);setMsg("↺ Restaurado a valores por defecto");setTimeout(()=>setMsg(""),2500);});
+
+      return (
+        <div className="layout">
+          <div>
+            <div className="panel">
+              <h2>💵 Tarifas y costos FBA</h2>
+              <div className="muted" style={{marginBottom:10}}>Ajusta las tarifas para que los cálculos reflejen tus números reales. Se guardan en el servidor.</div>
+              <label>Referral fee mínimo (USD)</label>
+              <input type="number" step="0.01" value={s.referral_minimum} onChange={e=>setNum("referral_minimum",e.target.value)} />
+              <label>Almacenamiento por pie³ (USD/mes)</label>
+              <input type="number" step="0.01" value={s.storage_fee_per_cuft} onChange={e=>setNum("storage_fee_per_cuft",e.target.value)} />
+              <label>Fulfillment fee sobredimensionado (USD)</label>
+              <input type="number" step="0.01" value={s.oversize_base_fee} onChange={e=>setNum("oversize_base_fee",e.target.value)} />
+              <label>Envío inbound por unidad (USD)</label>
+              <input type="number" step="0.01" value={s.default_inbound_shipping} onChange={e=>setNum("default_inbound_shipping",e.target.value)} />
+              <label>Costo de prep por unidad (USD)</label>
+              <input type="number" step="0.01" value={s.default_prep_cost} onChange={e=>setNum("default_prep_cost",e.target.value)} />
+              <button onClick={save}>💾 Guardar</button>
+              <button className="ghost" style={{width:"100%",marginTop:8}} onClick={reset}>↺ Restaurar por defecto</button>
+              {msg && <div className="pos" style={{marginTop:10}}>{msg}</div>}
+            </div>
+          </div>
+          <div className="panel">
+            <h2>Referral fee por categoría (%)</h2>
+            <div className="muted" style={{marginBottom:10}}>Porcentaje que Amazon cobra sobre el precio de venta, por categoría.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 110px",gap:"6px 12px",alignItems:"center"}}>
+              {Object.entries(s.referral_fee_pct).map(([cat,v])=>(
+                <React.Fragment key={cat}>
+                  <span style={{fontSize:13}}>{cat}</span>
+                  <input type="number" step="0.1" value={(+v*100).toFixed(1)} onChange={e=>setRef(cat, e.target.value/100)} />
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function App() {
       const [tab,setTab] = useState("scan");
       return (
@@ -388,8 +447,9 @@
             <div className="tabs">
               <div className={"tab "+(tab==="scan"?"active":"")} onClick={()=>setTab("scan")}>🔍 Buscador de ofertas</div>
               <div className={"tab "+(tab==="calc"?"active":"")} onClick={()=>setTab("calc")}>🧮 Calculadora</div>
+              <div className={"tab "+(tab==="settings"?"active":"")} onClick={()=>setTab("settings")}>💵 Tarifas FBA</div>
             </div>
-            {tab==="scan" ? <ScanTab/> : <CalcTab/>}
+            {tab==="scan" ? <ScanTab/> : tab==="calc" ? <CalcTab/> : <SettingsTab/>}
           </div>
         </div>
       );

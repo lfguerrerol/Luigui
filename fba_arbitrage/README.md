@@ -18,6 +18,8 @@ El dashboard también funciona **offline** (React/Babel vienen incluidos, sin CD
 - **Favoritos** persistentes (se guardan en el navegador) y filtro "solo favoritos".
 - **Exportar a CSV** las ofertas para tu lista de compras.
 - Pestaña **Calculadora** para analizar un producto manualmente.
+- Pestaña **Tarifas FBA** para editar referral fees por categoría, almacenamiento
+  y costos por unidad; se guardan en el servidor y afectan todos los cálculos.
 
 ---
 
@@ -67,6 +69,7 @@ fba_arbitrage/
 │   ├── models.py              # modelos Pydantic (productos, ofertas, filtros)
 │   ├── fba_calculator.py      # tarifas FBA + motor de rentabilidad
 │   ├── engine.py              # escaneo + filtros + lista de sourcing
+│   ├── settings.py            # tarifas FBA editables (persistidas en JSON)
 │   ├── sample_data.py         # catálogo de muestra (funciona sin API keys)
 │   └── connectors/
 │       ├── base.py            # interfaces de conectores
@@ -93,6 +96,9 @@ fba_arbitrage/
 | POST | `/api/scan` | Escaneo con filtros (cuerpo `ScanFilters`) |
 | GET | `/api/deals` | Igual que scan pero con query params |
 | POST | `/api/analyze` | Analiza un producto individual |
+| GET | `/api/settings` | Tarifas FBA actuales (defaults + overrides) |
+| PUT | `/api/settings` | Actualiza y guarda tarifas (validado) |
+| POST | `/api/settings/reset` | Restaura tarifas por defecto |
 | GET | `/api/health` | Healthcheck |
 
 ---
