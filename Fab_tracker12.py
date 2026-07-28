@@ -154,6 +154,7 @@ def init_data():
                 "client_id": proj["client_id"], "project_id": proj["id"], "process_id": proc["id"],
                 "assembly_number": asm["part_number"], "part_number": part["part_number"],
                 "description": part["description"], "process": proc["name"], "seq": seq,
+                "priority": idc,
                 "planned_start": "", "planned_end": "",
                 "actual_start":  "", "actual_end":   "",
                 "qty_ordered": ap["qty_ordered"], "qty_completed": 0,
@@ -264,6 +265,7 @@ if loaded:
         it.setdefault("actual_start",   "")
         it.setdefault("actual_end",     "")
         it.setdefault("cycle_time_min", None)
+        it.setdefault("priority", it.get("id"))
     tracker_db.update(loaded)
     # backfill "seq" for legacy records that predate this field
     by_part = {}
@@ -308,6 +310,9 @@ class BulkUpdateModel(BaseModel):
 class ReorderModel(BaseModel):
     assembly_part_id: int
     ordered_ids: list[int]   # process item ids in new desired sequence
+
+class PriorityReorderModel(BaseModel):
+    ordered_ids: list[int]   # item ids, in the new desired display order within a process section
 
 class ClientModel(BaseModel):
     name:    str
@@ -536,6 +541,7 @@ def upload(file: UploadFile = File(...)):
                 "description":    part["description"],
                 "process":        str(row["Process"]),
                 "seq":            seq,
+                "priority":       idc,
                 "planned_start":  "", "planned_end":  "",
                 "actual_start":   "", "actual_end":   "",
                 "qty_ordered":    int(row["Qty"]),
@@ -704,6 +710,21 @@ def reorder(data: ReorderModel):
             if item["id"] == item_id:
                 item["seq"] = new_seq
                 break
+    save_data()
+    return {"ok": True}
+
+# ─────────────────────────────────────────────
+# REORDER ROWS WITHIN A PROCESS SECTION (display/work priority — independent
+# of "seq", which only gates when the next manufacturing step can start)
+# ─────────────────────────────────────────────
+@app.put("/api/reorder-priority")
+def reorder_priority(data: PriorityReorderModel):
+    by_id = {i["id"]: i for i in tracker_db["items"]}
+    missing = [iid for iid in data.ordered_ids if iid not in by_id]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"ids inválidos: {missing}")
+    for pr, item_id in enumerate(data.ordered_ids, 1):
+        by_id[item_id]["priority"] = pr
     save_data()
     return {"ok": True}
 
@@ -1034,12 +1055,14 @@ def add_step(ap_id: int, data: StepModel):
         raise HTTPException(status_code=400, detail="Ese proceso ya está asignado a esta parte")
     existing = [i for i in tracker_db["items"] if i.get("assembly_part_id") == ap_id]
     seq = max([i.get("seq", 0) for i in existing], default=0) + 1
+    new_id = next_id(tracker_db["items"])
     item = {
-        "id": next_id(tracker_db["items"]), "assembly_part_id": ap_id,
+        "id": new_id, "assembly_part_id": ap_id,
         "assembly_id": asm["id"], "part_id": part["id"],
         "client_id": proj["client_id"], "project_id": proj["id"], "process_id": proc["id"],
         "assembly_number": asm["part_number"], "part_number": part["part_number"],
         "description": part["description"], "process": proc["name"], "seq": seq,
+        "priority": new_id,
         "planned_start": "", "planned_end": "", "actual_start": "", "actual_end": "",
         "qty_ordered": ap["qty_ordered"], "qty_completed": 0,
         "status": "Sin Iniciar", "notes": "", "cycle_time_min": None,
@@ -2396,6 +2419,7 @@ function AssembliesAdmin({assemblies,projects,clients,parts,assemblyParts,items,
   const [expandedPart,setExpandedPart]=useState(null);  // assembly_part id expandido
   const [bomForm,setBomForm]=useState({});
   const [addProc,setAddProc]=useState({});
+  const [qtyEdits,setQtyEdits]=useState({});  // { [assembly_part_id]: "new qty being typed" }
 
   const projName = id => (projects.find(p=>p.id===id)||{}).name || "—";
   const partsFor = aid => assemblyParts.filter(ap=>ap.assembly_id===aid);
@@ -2445,6 +2469,14 @@ function AssembliesAdmin({assemblies,projects,clients,parts,assemblyParts,items,
     }
   };
   const delPart = ap=>requestDelete("/api/assembly-parts", ap.id, "Parte asignada", partInfo(ap.part_id).part_number, setModal, reload);
+
+  const saveQty = ap=>{
+    const qty = parseInt(qtyEdits[ap.id]);
+    if(!qty || qty===ap.qty_ordered){ setQtyEdits({...qtyEdits,[ap.id]:undefined}); return; }
+    fetch(`/api/assembly-parts/${ap.id}`,{method:"PUT",headers:JSONH,body:JSON.stringify({qty_ordered:qty})})
+      .then(r=>{ if(!r.ok) r.json().then(e=>alert("⚠ "+e.detail));
+        else { setQtyEdits({...qtyEdits,[ap.id]:undefined}); reload(); } });
+  };
 
   const addStep = apId=>{
     const pid = addProc[apId];
@@ -2518,7 +2550,15 @@ function AssembliesAdmin({assemblies,projects,clients,parts,assemblyParts,items,
                     h("div",{style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}},
                       h("span",{style:{color:"#4fc3f7",fontWeight:700}},pinfo.part_number),
                       h("span",{style:{color:"#6a88a8",fontSize:11}},pinfo.description||""),
-                      h("span",{style:{fontSize:11,color:"#8ba0b8"}},`Qty: ${ap.qty_ordered}`),
+                      h("span",{style:{fontSize:11,color:"#8ba0b8",display:"flex",alignItems:"center",gap:4}},
+                        "Qty a producir:",
+                        h("input",{type:"number",style:{width:70},
+                          value:qtyEdits[ap.id]!==undefined?qtyEdits[ap.id]:ap.qty_ordered,
+                          onChange:e=>setQtyEdits({...qtyEdits,[ap.id]:e.target.value})}),
+                        qtyEdits[ap.id]!==undefined&&qtyEdits[ap.id]!=String(ap.qty_ordered)&&
+                          h("button",{className:"btn btn-bulk",style:{padding:"2px 8px"},
+                            onClick:()=>saveQty(ap)},"Guardar")
+                      ),
                       h("span",{className:"expand-toggle",onClick:()=>setExpandedPart(isPartExpanded?null:ap.id)},
                         `${steps.length} proceso(s) ${isPartExpanded?"▲":"▼"}`),
                       h("button",{className:"btn btn-pdf",style:{padding:"2px 8px"},onClick:()=>delPart(ap)},"🗑")
@@ -2802,6 +2842,18 @@ function App(){
     setProcOrder(order);
   };
 
+  /* ── move a row up/down within its process section (work order) ── */
+  const moveRow=(procItems,itemId,dir)=>{
+    const arr=[...procItems];
+    const idx=arr.findIndex(i=>i.id===itemId);
+    const swapIdx=idx+dir;
+    if(idx<0||swapIdx<0||swapIdx>=arr.length) return;
+    [arr[idx],arr[swapIdx]]=[arr[swapIdx],arr[idx]];
+    fetch("/api/reorder-priority",{method:"PUT",headers:JSONH,
+      body:JSON.stringify({ordered_ids:arr.map(i=>i.id)})})
+      .then(r=>{ if(!r.ok) r.json().then(e=>alert("⚠ "+e.detail)); else load(); });
+  };
+
   if(!data) return h("div",{style:{padding:40,color:"#4fc3f7"}},"Cargando...");
 
   const displayProcs = procOrder || data.processes;
@@ -2830,8 +2882,9 @@ function App(){
     if(!procMap[i.process]) procMap[i.process]=[];
     procMap[i.process].push(i);
   });
-  // sort each proc's items by seq
-  Object.values(procMap).forEach(arr=>arr.sort((a,b)=>(a.seq??a.id)-(b.seq??b.id)));
+  // sort each proc's items by priority (manual work order within that process,
+  // independent of "seq" which only gates cross-process progression)
+  Object.values(procMap).forEach(arr=>arr.sort((a,b)=>(a.priority??a.id)-(b.priority??b.id)));
 
   // grouped by assembly_part_id (NOT by raw part_number) so a shared part
   // tracked in two different assemblies never mixes its progress together
@@ -2896,6 +2949,10 @@ function App(){
       const isOpen=!!open[p];
       const sel=selected[p]||new Set();
       const selCount=sel.size;
+      // when every row in this section belongs to the same ensamble, show it
+      // once in the header instead of repeating it on every row
+      const asmSet=new Set(pi.map(i=>i.assembly_number));
+      const singleAsm=asmSet.size===1 ? [...asmSet][0] : null;
 
       return h("div",{
         key:p, className:"proc-section",
@@ -2909,6 +2966,8 @@ function App(){
           h("span",{className:"drag-handle",onClick:e=>e.stopPropagation()},"⠿"),
           h("span",{style:{fontSize:16}},(isOpen?"▼":"▶")),
           h("span",{className:"proc-title"},p),
+          singleAsm&&h("span",{className:"stat-chip",style:{background:"#0d2040",color:"#4fc3f7"}},
+            `🧩 ${singleAsm}`),
           alertSet.has(p)&&h("span",{className:"bottleneck-badge"},"⚠ Cuello de Botella"),
           h("div",{className:"proc-stats"},
             h("span",{className:"stat-chip chip-sin"},`⚪ ${sin}`),
@@ -2943,10 +3002,13 @@ function App(){
           h("table",null,
             h("thead",null,h("tr",null,
               h("th",{className:"cb-cell"},""),
-              ...["Ensamble","Part","Descripción","Estado","Qty","Ini.Plan","Fin Plan",
-                  "Ini.Real","Fin Real","T.Ciclo","Notas"].map(c=>h("th",{key:c},c))
+              h("th",null,"Ord."),
+              ...(singleAsm?[]:["Ensamble"]).concat(
+                ["Part","Descripción","Estado","Qty","Ini.Plan","Fin Plan",
+                 "Ini.Real","Fin Real","T.Ciclo","Notas"]
+              ).map(c=>h("th",{key:c},c))
             )),
-            h("tbody",null,pi.map(item=>
+            h("tbody",null,pi.map((item,idx)=>
               h("tr",{key:item.id,className:STATUS_CLASS[item.status]||"sin"},
                 /* checkbox */
                 h("td",{className:"cb-cell"},
@@ -2957,7 +3019,16 @@ function App(){
                       setSelected(s=>({...s,[p]:ns}));
                     }})
                 ),
-                h("td",null,item.assembly_number),
+                /* row order arrows */
+                h("td",null,
+                  h("div",{style:{display:"flex",flexDirection:"column",gap:1}},
+                    h("button",{className:"btn btn-cancel",style:{padding:"0 5px",fontSize:10,lineHeight:1.4},
+                      disabled:idx===0, onClick:()=>moveRow(pi,item.id,-1)},"▲"),
+                    h("button",{className:"btn btn-cancel",style:{padding:"0 5px",fontSize:10,lineHeight:1.4},
+                      disabled:idx===pi.length-1, onClick:()=>moveRow(pi,item.id,1)},"▼")
+                  )
+                ),
+                ...(singleAsm?[]:[h("td",{key:"asm"},item.assembly_number)]),
                 h("td",null,item.part_number),
                 h("td",null,item.description),
                 h("td",null,
