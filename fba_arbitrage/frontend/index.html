@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FBA Arbitrage Finder</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
+
+  <!-- Vendored locally so the dashboard works offline / without a CDN -->
+  <script src="/vendor/react.production.min.js"></script>
+  <script src="/vendor/react-dom.production.min.js"></script>
+  <script src="/vendor/babel.min.js"></script>
+  <style>
+    :root {
+      --bg:#0f172a; --panel:#1e293b; --panel2:#273549; --line:#334155;
+      --text:#e2e8f0; --muted:#94a3b8; --accent:#22c55e; --accent2:#38bdf8;
+      --warn:#f59e0b; --bad:#ef4444;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+           background:var(--bg); color:var(--text); }
+    header { padding:18px 24px; background:linear-gradient(90deg,#065f46,#0e7490);
+             display:flex; align-items:center; justify-content:space-between; }
+    header h1 { margin:0; font-size:20px; }
+    header .sub { color:#d1fae5; font-size:13px; }
+    .wrap { max-width:1320px; margin:0 auto; padding:20px; }
+    .banner { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+              padding:10px 14px; margin-bottom:16px; font-size:13px; color:var(--muted); }
+    .banner b { color:var(--accent2); }
+    .layout { display:grid; grid-template-columns:300px 1fr; gap:18px; }
+    @media(max-width:900px){ .layout{ grid-template-columns:1fr; } }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .panel h2 { margin:0 0 12px; font-size:15px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+    input, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+                    background:var(--panel2); color:var(--text); font-size:14px; }
+    .goal-input { border-color:var(--accent); font-weight:600; }
+    button { width:100%; margin-top:16px; padding:11px; border:none; border-radius:8px;
+             background:var(--accent); color:#03210f; font-weight:700; font-size:15px; cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    button.ghost { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+                   margin-top:0; width:auto; padding:7px 14px; font-size:13px; }
+    .cards { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+    @media(max-width:900px){ .cards{ grid-template-columns:repeat(2,1fr);} }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+    .card .k { font-size:12px; color:var(--muted); }
+    .card .v { font-size:24px; font-weight:800; margin-top:4px; }
+    .goal-card.ok .v { color:var(--accent); }
+    .goal-card.no .v { color:var(--warn); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; }
+    th.sortable { cursor:pointer; user-select:none; }
+    th.sortable:hover { color:var(--text); }
+    th .arrow { color:var(--accent); margin-left:3px; }
+    tr.rec { background:rgba(34,197,94,0.06); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+    .pos { color:var(--accent); } .neg { color:var(--bad); }
+    .badge { font-size:10px; padding:2px 6px; border-radius:6px; background:var(--panel2); color:var(--muted); }
+    .tag-src { background:#1d4ed8; color:#dbeafe; }
+    .note { font-size:11px; color:var(--warn); }
+    a { color:var(--accent2); text-decoration:none; }
+    .tabs { display:flex; gap:8px; margin-bottom:14px; }
+    .tab { padding:8px 14px; border-radius:8px; background:var(--panel); border:1px solid var(--line);
+           cursor:pointer; font-size:13px; }
+    .tab.active { background:var(--accent); color:#03210f; font-weight:700; border-color:var(--accent); }
+    .muted { color:var(--muted); font-size:12px; }
+    .calc-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+    /* goal progress bar */
+    .progress { height:14px; background:var(--panel2); border-radius:999px; overflow:hidden; margin:8px 0 4px; }
+    .progress > div { height:100%; background:linear-gradient(90deg,#16a34a,#22c55e); transition:width .4s; }
+    .progress.over > div { background:linear-gradient(90deg,#0891b2,#38bdf8); }
+    /* toolbar */
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .toolbar .spacer { flex:1; }
+    .star { cursor:pointer; font-size:15px; color:#475569; background:none; border:none; width:auto; margin:0; padding:0; }
+    .star.on { color:#facc15; }
+    /* bar chart */
+    .bar-row { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
+    .bar-row .name { width:190px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--muted); }
+    .bar-track { flex:1; background:var(--panel2); border-radius:6px; height:20px; position:relative; }
+    .bar-fill { height:100%; border-radius:6px; background:linear-gradient(90deg,#0e7490,#22c55e); }
+    .bar-val { width:90px; text-align:right; font-weight:700; color:var(--accent); }
+    .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+    const API = "";  // same origin
+    const money = n => n==null ? "—" : "$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const pct = n => n==null ? "—" : Number(n).toFixed(1)+"%";
+
+    // ---- favorites persistence (localStorage) ----
+    const FAV_KEY = "fba_favorites";
+    const loadFavs = () => { try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY)||"[]")); } catch { return new Set(); } };
+    const saveFavs = s => localStorage.setItem(FAV_KEY, JSON.stringify([...s]));
+
+    function Field({label, ...p}) {
+      return <div><label>{label}</label><input {...p}/></div>;
+    }
+
+    // ---- CSV export ----
+    function exportCSV(deals) {
+      const cols = ["Producto","Categoria","Tienda","Descuento%","Compra","Amazon",
+        "GananciaUnidad","Margen%","ROI%","VentasMes","ProyeccionMes","UnidadesParaMeta","Proveedor","URL"];
+      const rows = deals.map(d => [
+        d.product.title, d.product.category, d.product.source, d.product.discount_pct,
+        d.buy_cost, d.insight.amazon_price, d.net_profit, d.margin_pct, d.roi_pct,
+        d.est_monthly_sales||"", d.projected_monthly_profit||"", d.units_needed_for_goal||"",
+        d.insight.provider, d.product.url||""
+      ]);
+      const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+      const csv = [cols.map(esc).join(","), ...rows.map(r=>r.map(esc).join(","))].join("\n");
+      const blob = new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8;"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `fba_ofertas_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    // ---- profitability bar chart (inline, no libs) ----
+    function ProfitChart({deals}) {
+      const top = deals.filter(d=>d.projected_monthly_profit>0)
+                       .sort((a,b)=>b.projected_monthly_profit-a.projected_monthly_profit).slice(0,8);
+      if (!top.length) return null;
+      const max = top[0].projected_monthly_profit;
+      return (
+        <div className="panel">
+          <h2>📊 Top ofertas por ganancia proyectada/mes</h2>
+          {top.map(d=>(
+            <div className="bar-row" key={d.id}>
+              <div className="name" title={d.product.title}>{d.product.title}</div>
+              <div className="bar-track"><div className="bar-fill" style={{width:(d.projected_monthly_profit/max*100)+"%"}}/></div>
+              <div className="bar-val">{money(d.projected_monthly_profit)}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ---- goal progress ----
+    function GoalProgress({current, goal}) {
+      const p = goal>0 ? Math.min(current/goal*100, 100) : 0;
+      const over = current >= goal;
+      return (
+        <div className="panel" style={{marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+            <span>Progreso hacia la meta</span>
+            <b className={over?"pos":""}>{money(current)} / {money(goal)}</b>
+          </div>
+          <div className={"progress "+(over?"over":"")}><div style={{width:p+"%"}}/></div>
+          <div className="muted">{over ? "🎉 Meta alcanzada con las ofertas calificadas" : `Falta ${money(goal-current)} para tu meta mensual`}</div>
+        </div>
+      );
+    }
+
+    function ScanTab() {
+      const [f, setF] = useState({
+        monthly_profit_goal:1000, min_margin_pct:15, min_roi_pct:0,
+        min_net_profit:2, min_monthly_sales:0, min_rating:0,
+        max_offer_count:999, capture_rate:0.30, exclude_amazon_seller:true,
+        retailers:[], categories:[],
+      });
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [cfg, setCfg] = useState(null);
+      const [favs, setFavs] = useState(loadFavs());
+      const [onlyFavs, setOnlyFavs] = useState(false);
+      const [sort, setSort] = useState({key:"projected_monthly_profit", dir:-1});
+      const set = (k,v) => setF(s=>({...s,[k]:v}));
+
+      useEffect(()=>{ fetch(API+"/api/config").then(r=>r.json()).then(setCfg); },[]);
+      const run = () => {
+        setLoading(true);
+        fetch(API+"/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(f)}).then(r=>r.json()).then(d=>{setData(d);setLoading(false);});
+      };
+      useEffect(()=>{ run(); },[]);
+
+      const toggleFav = id => setFavs(prev => {
+        const n = new Set(prev); n.has(id)?n.delete(id):n.add(id); saveFavs(n); return n;
+      });
+
+      const recIds = new Set((data?.recommended_sourcing||[]).map(d=>d.id));
+
+      // sortable + favorite-filtered view
+      const sortKey = d => {
+        switch(sort.key){
+          case "title": return d.product.title.toLowerCase();
+          case "source": return d.product.source;
+          case "amazon_price": return d.insight.amazon_price;
+          case "est_monthly_sales": return d.est_monthly_sales||0;
+          default: return d[sort.key]||0;
+        }
+      };
+      const view = useMemo(()=>{
+        let arr = (data?.deals||[]);
+        if (onlyFavs) arr = arr.filter(d=>favs.has(d.id));
+        return [...arr].sort((a,b)=>{
+          const av=sortKey(a), bv=sortKey(b);
+          if (av<bv) return sort.dir; if (av>bv) return -sort.dir; return 0;
+        });
+      }, [data, onlyFavs, favs, sort]);
+
+      const clickSort = key => setSort(s => s.key===key ? {key, dir:-s.dir} : {key, dir:-1});
+      const Arrow = ({k}) => sort.key===k ? <span className="arrow">{sort.dir<0?"▼":"▲"}</span> : null;
+
+      const th = (key,label) => <th className="sortable" onClick={()=>clickSort(key)}>{label}<Arrow k={key}/></th>;
+
+      return (
+        <div>
+          {cfg && cfg.using_sample_data &&
+            <div className="banner">⚙️ Corriendo con <b>datos de muestra</b>. Para datos reales, configura las claves API
+             (KEEPA_API_KEY, JUNGLESCOUT_API_KEY + JUNGLESCOUT_KEY_NAME, WALMART_API_KEY, etc.) como variables de entorno.</div>}
+
+          <div className="layout">
+            <div>
+              <div className="panel">
+              <h2>🎯 Filtros de sourcing</h2>
+              <label>Meta de ganancia mensual (USD)</label>
+              <input className="goal-input" type="number" value={f.monthly_profit_goal}
+                     onChange={e=>set("monthly_profit_goal",+e.target.value)} />
+              <label>Margen mínimo (%)</label>
+              <input type="number" value={f.min_margin_pct} onChange={e=>set("min_margin_pct",+e.target.value)} />
+              <label>ROI mínimo (%)</label>
+              <input type="number" value={f.min_roi_pct} onChange={e=>set("min_roi_pct",+e.target.value)} />
+              <label>Ganancia mínima por unidad (USD)</label>
+              <input type="number" value={f.min_net_profit} onChange={e=>set("min_net_profit",+e.target.value)} />
+              <label>Ventas mensuales mínimas (listado)</label>
+              <input type="number" value={f.min_monthly_sales} onChange={e=>set("min_monthly_sales",+e.target.value)} />
+              <label>Rating mínimo (estrellas)</label>
+              <input type="number" step="0.1" value={f.min_rating} onChange={e=>set("min_rating",+e.target.value)} />
+              <label>% de ventas que capturas (0-1)</label>
+              <input type="number" step="0.05" value={f.capture_rate} onChange={e=>set("capture_rate",+e.target.value)} />
+              <label>Categoría</label>
+              <select value={f.categories[0]||""} onChange={e=>set("categories", e.target.value?[e.target.value]:[])}>
+                <option value="">Todas</option>
+                {cfg && cfg.categories.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+              <label style={{marginTop:12}}>
+                <input type="checkbox" style={{width:"auto",marginRight:6}} checked={f.exclude_amazon_seller}
+                  onChange={e=>set("exclude_amazon_seller",e.target.checked)} />
+                Excluir listados donde Amazon vende
+              </label>
+              <button onClick={run}>{loading?"Buscando…":"🔍 Buscar ofertas"}</button>
+              </div>
+            </div>
+
+            <div>
+              {data && <>
+                <div className="cards">
+                  <div className="card"><div className="k">Candidatos</div><div className="v">{data.total_candidates}</div></div>
+                  <div className="card"><div className="k">Califican</div><div className="v">{data.qualified}</div></div>
+                  <div className={"card goal-card "+(data.goal_reached?"ok":"no")}>
+                    <div className="k">Meta ${data.monthly_profit_goal}/mes</div>
+                    <div className="v">{data.goal_reached?"✓ Alcanzada":"✗ Falta"}</div></div>
+                  <div className="card"><div className="k">Ganancia proyectada/mes</div>
+                    <div className="v">{money(data.projected_portfolio_profit)}</div></div>
+                </div>
+
+                <GoalProgress current={data.projected_portfolio_profit} goal={data.monthly_profit_goal} />
+
+                <ProfitChart deals={data.deals} />
+
+                <div className="panel">
+                  <div className="toolbar">
+                    <h2 style={{margin:0}}>Ofertas calificadas <span className="muted">({view.length})</span></h2>
+                    <div className="spacer"></div>
+                    <span className="chip">
+                      <input type="checkbox" style={{width:"auto"}} checked={onlyFavs}
+                             onChange={e=>setOnlyFavs(e.target.checked)} /> ⭐ Solo favoritos ({favs.size})
+                    </span>
+                    <button className="ghost" onClick={()=>exportCSV(view)}>⬇️ Exportar CSV</button>
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                  <table>
+                    <thead><tr>
+                      <th></th>
+                      {th("title","Producto")}{th("source","Tienda")}{th("buy_cost","Compra")}
+                      {th("amazon_price","Amazon")}{th("net_profit","Ganancia/u")}{th("margin_pct","Margen")}
+                      {th("roi_pct","ROI")}{th("est_monthly_sales","Ventas/mes")}
+                      {th("projected_monthly_profit","Proy./mes")}{th("units_needed_for_goal","Uds. p/meta")}
+                    </tr></thead>
+                    <tbody>
+                    {view.map(d=>(
+                      <tr key={d.id} className={recIds.has(d.id)?"rec":""}>
+                        <td><button className={"star "+(favs.has(d.id)?"on":"")} title="Favorito"
+                             onClick={()=>toggleFav(d.id)}>{favs.has(d.id)?"★":"☆"}</button></td>
+                        <td style={{maxWidth:220}}>
+                          {recIds.has(d.id) && <span className="pill" style={{background:"var(--accent)",color:"#03210f",marginRight:6}}>★</span>}
+                          <a href={d.product.url} target="_blank">{d.product.title}</a>
+                          <div className="badge">{d.product.category}</div>
+                          {d.notes.map((n,i)=><div key={i} className="note">⚠ {n}</div>)}
+                        </td>
+                        <td><span className="badge tag-src">{d.product.source}</span>
+                            <div className="muted">-{d.product.discount_pct||"?"}%</div></td>
+                        <td>{money(d.buy_cost)}</td>
+                        <td>{money(d.insight.amazon_price)}<div className="muted">{d.insight.provider}</div></td>
+                        <td className={d.net_profit>=0?"pos":"neg"}><b>{money(d.net_profit)}</b></td>
+                        <td className={d.margin_pct>=f.min_margin_pct?"pos":""}>{pct(d.margin_pct)}</td>
+                        <td>{pct(d.roi_pct)}</td>
+                        <td>{d.est_monthly_sales||"—"}<div className="muted">rank {d.insight.sales_rank||"—"}</div></td>
+                        <td className="pos"><b>{money(d.projected_monthly_profit)}</b>
+                            <div className="muted">{d.projected_monthly_units} uds</div></td>
+                        <td>{d.units_needed_for_goal||"—"}</td>
+                      </tr>
+                    ))}
+                    {view.length===0 && <tr><td colSpan="11" className="muted" style={{padding:20,textAlign:"center"}}>
+                      {onlyFavs ? "No tienes favoritos guardados todavía." : "Ningún producto califica con estos filtros."}</td></tr>}
+                    </tbody>
+                  </table>
+                  </div>
+                </div>
+              </>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function CalcTab() {
+      const [i,setI] = useState({buy_price:59,amazon_price:109.99,category:"home_kitchen",
+        weight_lb:8,est_monthly_sales:2100,monthly_profit_goal:1000,capture_rate:0.30,
+        sales_tax_pct:0,inbound_shipping_per_unit:0.5,prep_cost_per_unit:0.3});
+      const [out,setOut] = useState(null);
+      const set=(k,v)=>setI(s=>({...s,[k]:v}));
+      const run=()=>fetch(API+"/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(i)}).then(r=>r.json()).then(setOut);
+      useEffect(()=>{run();},[]);
+      return (
+        <div className="layout">
+          <div><div className="panel">
+            <h2>🧮 Calculadora manual</h2>
+            <div className="calc-grid">
+              <Field label="Precio de compra" type="number" value={i.buy_price} onChange={e=>set("buy_price",+e.target.value)}/>
+              <Field label="Precio en Amazon" type="number" value={i.amazon_price} onChange={e=>set("amazon_price",+e.target.value)}/>
+              <Field label="Peso (lb)" type="number" value={i.weight_lb} onChange={e=>set("weight_lb",+e.target.value)}/>
+              <Field label="Ventas/mes listado" type="number" value={i.est_monthly_sales} onChange={e=>set("est_monthly_sales",+e.target.value)}/>
+              <Field label="Meta mensual" type="number" value={i.monthly_profit_goal} onChange={e=>set("monthly_profit_goal",+e.target.value)}/>
+              <Field label="Captura (0-1)" type="number" step="0.05" value={i.capture_rate} onChange={e=>set("capture_rate",+e.target.value)}/>
+              <Field label="Impuesto compra (0-1)" type="number" step="0.01" value={i.sales_tax_pct} onChange={e=>set("sales_tax_pct",+e.target.value)}/>
+              <Field label="Envío inbound/u" type="number" step="0.1" value={i.inbound_shipping_per_unit} onChange={e=>set("inbound_shipping_per_unit",+e.target.value)}/>
+            </div>
+            <button onClick={run}>Calcular</button>
+          </div></div>
+          <div>
+            {out && <>
+              <div className="cards">
+                <div className="card"><div className="k">Ganancia/unidad</div>
+                  <div className={"v "+(out.result.net_profit>=0?"pos":"neg")}>{money(out.result.net_profit)}</div></div>
+                <div className="card"><div className="k">Margen</div><div className="v">{pct(out.result.margin_pct)}</div></div>
+                <div className="card"><div className="k">ROI</div><div className="v">{pct(out.result.roi_pct)}</div></div>
+                <div className={"card goal-card "+(out.goal_reached_by_listing?"ok":"no")}>
+                  <div className="k">¿Meta con 1 listado?</div>
+                  <div className="v">{out.goal_reached_by_listing?"✓ Sí":"✗ No"}</div></div>
+              </div>
+              <div className="panel">
+                <h2>Desglose de costos</h2>
+                <table><tbody>
+                  <tr><td>Costo de compra</td><td>{money(out.result.buy_cost)}</td></tr>
+                  <tr><td>Referral fee</td><td>{money(out.result.referral_fee)}</td></tr>
+                  <tr><td>Fulfillment fee</td><td>{money(out.result.fulfillment_fee)}</td></tr>
+                  <tr><td>Almacenamiento</td><td>{money(out.result.storage_fee)}</td></tr>
+                  <tr><td>Envío inbound + prep</td><td>{money(out.result.inbound_shipping+out.result.prep_cost)}</td></tr>
+                  <tr><td><b>Costo total</b></td><td><b>{money(out.result.total_cost)}</b></td></tr>
+                  <tr><td><b>Ganancia neta</b></td><td className={out.result.net_profit>=0?"pos":"neg"}><b>{money(out.result.net_profit)}</b></td></tr>
+                  <tr><td>Unidades/mes necesarias p/meta</td><td>{out.units_needed_for_goal||"—"}</td></tr>
+                  <tr><td>Ganancia proyectada/mes</td><td className="pos">{money(out.projected_monthly_profit)} ({out.projected_monthly_units} uds)</td></tr>
+                </tbody></table>
+              </div>
+            </>}
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsTab() {
+      const [s, setS] = useState(null);
+      const [msg, setMsg] = useState("");
+      const load = () => fetch(API+"/api/settings").then(r=>r.json()).then(setS);
+      useEffect(()=>{ load(); },[]);
+      if (!s) return <div className="muted">Cargando…</div>;
+
+      const setNum = (k,v) => setS(o=>({...o,[k]:v}));
+      const setRef = (cat,v) => setS(o=>({...o, referral_fee_pct:{...o.referral_fee_pct,[cat]:v}}));
+      const save = () => {
+        // state already holds referral percentages as 0-1 fractions
+        const patch = {
+          referral_fee_pct: Object.fromEntries(Object.entries(s.referral_fee_pct).map(([c,v])=>[c, +v])),
+          referral_minimum:+s.referral_minimum, storage_fee_per_cuft:+s.storage_fee_per_cuft,
+          oversize_base_fee:+s.oversize_base_fee, default_inbound_shipping:+s.default_inbound_shipping,
+          default_prep_cost:+s.default_prep_cost,
+        };
+        fetch(API+"/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)})
+          .then(r=>r.json()).then(d=>{ setMsg("✓ Guardado"); setTimeout(()=>setMsg(""),2500); });
+      };
+      const reset = () => fetch(API+"/api/settings/reset",{method:"POST"}).then(r=>r.json()).then(d=>{setS(d);setMsg("↺ Restaurado a valores por defecto");setTimeout(()=>setMsg(""),2500);});
+
+      return (
+        <div className="layout">
+          <div>
+            <div className="panel">
+              <h2>💵 Tarifas y costos FBA</h2>
+              <div className="muted" style={{marginBottom:10}}>Ajusta las tarifas para que los cálculos reflejen tus números reales. Se guardan en el servidor.</div>
+              <label>Referral fee mínimo (USD)</label>
+              <input type="number" step="0.01" value={s.referral_minimum} onChange={e=>setNum("referral_minimum",e.target.value)} />
+              <label>Almacenamiento por pie³ (USD/mes)</label>
+              <input type="number" step="0.01" value={s.storage_fee_per_cuft} onChange={e=>setNum("storage_fee_per_cuft",e.target.value)} />
+              <label>Fulfillment fee sobredimensionado (USD)</label>
+              <input type="number" step="0.01" value={s.oversize_base_fee} onChange={e=>setNum("oversize_base_fee",e.target.value)} />
+              <label>Envío inbound por unidad (USD)</label>
+              <input type="number" step="0.01" value={s.default_inbound_shipping} onChange={e=>setNum("default_inbound_shipping",e.target.value)} />
+              <label>Costo de prep por unidad (USD)</label>
+              <input type="number" step="0.01" value={s.default_prep_cost} onChange={e=>setNum("default_prep_cost",e.target.value)} />
+              <button onClick={save}>💾 Guardar</button>
+              <button className="ghost" style={{width:"100%",marginTop:8}} onClick={reset}>↺ Restaurar por defecto</button>
+              {msg && <div className="pos" style={{marginTop:10}}>{msg}</div>}
+            </div>
+          </div>
+          <div className="panel">
+            <h2>Referral fee por categoría (%)</h2>
+            <div className="muted" style={{marginBottom:10}}>Porcentaje que Amazon cobra sobre el precio de venta, por categoría.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 110px",gap:"6px 12px",alignItems:"center"}}>
+              {Object.entries(s.referral_fee_pct).map(([cat,v])=>(
+                <React.Fragment key={cat}>
+                  <span style={{fontSize:13}}>{cat}</span>
+                  <input type="number" step="0.1" value={(+v*100).toFixed(1)} onChange={e=>setRef(cat, e.target.value/100)} />
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [tab,setTab] = useState("scan");
+      return (
+        <div>
+          <header>
+            <div><h1>📈 FBA Arbitrage Finder</h1>
+              <div className="sub">Encuentra descuentos → revende en Amazon con ganancia</div></div>
+          </header>
+          <div className="wrap">
+            <div className="tabs">
+              <div className={"tab "+(tab==="scan"?"active":"")} onClick={()=>setTab("scan")}>🔍 Buscador de ofertas</div>
+              <div className={"tab "+(tab==="calc"?"active":"")} onClick={()=>setTab("calc")}>🧮 Calculadora</div>
+              <div className={"tab "+(tab==="settings"?"active":"")} onClick={()=>setTab("settings")}>💵 Tarifas FBA</div>
+            </div>
+            {tab==="scan" ? <ScanTab/> : tab==="calc" ? <CalcTab/> : <SettingsTab/>}
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

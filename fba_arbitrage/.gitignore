@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+*.json.bak
+
+fba_settings.json
