@@ -2021,9 +2021,11 @@ table{width:100%;border-collapse:collapse;font-size:12px;}
 th{background:#1a2d4a;color:#8bb8d8;padding:7px 8px;text-align:left;
    position:sticky;top:0;white-space:nowrap;}
 td{padding:6px 8px;border-bottom:1px solid #0d1f35;}
-tr.comp{background:#0a1f0f;}
-tr.proc{background:#1a1400;}
+tr.comp{background:#1a5c2a;}
+tr.proc{background:#3a2f00;}
 tr.sin {background:#080e1a;}
+tr.date-sep td{background:#0d2040;color:#e6d17a;font-weight:700;font-size:11px;padding:6px 10px;
+  border-top:1px solid #1f3864;border-bottom:1px solid #1f3864;}
 tr:hover td{background:#0e2035;}
 td.cb-cell{width:28px;text-align:center;}
 input[type=checkbox]{accent-color:#4fc3f7;width:14px;height:14px;cursor:pointer;}
@@ -2738,6 +2740,7 @@ function App(){
   const [data,    setData  ]=useState(null);
   const [alerts,  setAlerts]=useState([]);
   const [open,    setOpen  ]=useState({});
+  const [groupByDate,setGroupByDate]=useState({});  // {procName: bool} — agrupar filas por fecha
   const [file,    setFile  ]=useState(null);
   const [tab,     setTab   ]=useState("procesos");
   // bulk
@@ -2842,12 +2845,20 @@ function App(){
     setProcOrder(order);
   };
 
-  /* ── move a row up/down within its process section (work order) ── */
-  const moveRow=(procItems,itemId,dir)=>{
-    const arr=[...procItems];
+  /* ── date grouping helpers (Procesos tab) ── */
+  const dateOf = it => (it.planned_start || it.actual_start || "").slice(0,10) || "Sin fecha";
+  const fmtDateSep = dk => dk==="Sin fecha" ? "📅 Sin fecha" :
+    "📅 " + new Date(dk+"T00:00:00").toLocaleDateString("es-MX",
+      {weekday:"long", day:"2-digit", month:"short", year:"numeric"});
+
+  /* ── move a row up/down within its process section (work order) ──
+     when grouped by date, a row can't cross into a different day's group ── */
+  const moveRow=(displayItems,itemId,dir,constrainToDate)=>{
+    const arr=[...displayItems];
     const idx=arr.findIndex(i=>i.id===itemId);
     const swapIdx=idx+dir;
     if(idx<0||swapIdx<0||swapIdx>=arr.length) return;
+    if(constrainToDate && dateOf(arr[idx])!==dateOf(arr[swapIdx])) return;
     [arr[idx],arr[swapIdx]]=[arr[swapIdx],arr[idx]];
     fetch("/api/reorder-priority",{method:"PUT",headers:JSONH,
       body:JSON.stringify({ordered_ids:arr.map(i=>i.id)})})
@@ -2953,6 +2964,11 @@ function App(){
       // once in the header instead of repeating it on every row
       const asmSet=new Set(pi.map(i=>i.assembly_number));
       const singleAsm=asmSet.size===1 ? [...asmSet][0] : null;
+      // date grouping (Ord. arrows stay free-form when off, and are locked to
+      // their own day's block once grouping is on)
+      const grouped=!!groupByDate[p];
+      const displayItems=grouped ? [...pi].sort((a,b)=>dateOf(a).localeCompare(dateOf(b))) : pi;
+      const colCount=(singleAsm?12:13);
 
       return h("div",{
         key:p, className:"proc-section",
@@ -2968,6 +2984,11 @@ function App(){
           h("span",{className:"proc-title"},p),
           singleAsm&&h("span",{className:"stat-chip",style:{background:"#0d2040",color:"#4fc3f7"}},
             `🧩 ${singleAsm}`),
+          h("button",{
+            className:"btn "+(grouped?"btn-bulk":"btn-cancel"),
+            style:{padding:"3px 10px",fontSize:11},
+            onClick:e=>{ e.stopPropagation(); setGroupByDate({...groupByDate,[p]:!grouped}); }
+          }, grouped?"📅 Agrupado":"📅 Agrupar por fecha"),
           alertSet.has(p)&&h("span",{className:"bottleneck-badge"},"⚠ Cuello de Botella"),
           h("div",{className:"proc-stats"},
             h("span",{className:"stat-chip chip-sin"},`⚪ ${sin}`),
@@ -3008,7 +3029,16 @@ function App(){
                  "Ini.Real","Fin Real","T.Ciclo","Notas"]
               ).map(c=>h("th",{key:c},c))
             )),
-            h("tbody",null,pi.map((item,idx)=>
+            h("tbody",null,displayItems.map((item,idx)=>{
+              const rows=[];
+              const prevDiffDay = idx===0 || dateOf(displayItems[idx-1])!==dateOf(item);
+              const nextDiffDay = idx===displayItems.length-1 || dateOf(displayItems[idx+1])!==dateOf(item);
+              if(grouped && prevDiffDay){
+                rows.push(h("tr",{key:"sep-"+dateOf(item)+"-"+item.id,className:"date-sep"},
+                  h("td",{colSpan:colCount},fmtDateSep(dateOf(item)))
+                ));
+              }
+              rows.push(
               h("tr",{key:item.id,className:STATUS_CLASS[item.status]||"sin"},
                 /* checkbox */
                 h("td",{className:"cb-cell"},
@@ -3019,13 +3049,15 @@ function App(){
                       setSelected(s=>({...s,[p]:ns}));
                     }})
                 ),
-                /* row order arrows */
+                /* row order arrows — locked to the same day's block while grouped */
                 h("td",null,
                   h("div",{style:{display:"flex",flexDirection:"column",gap:1}},
                     h("button",{className:"btn btn-cancel",style:{padding:"0 5px",fontSize:10,lineHeight:1.4},
-                      disabled:idx===0, onClick:()=>moveRow(pi,item.id,-1)},"▲"),
+                      disabled:grouped?prevDiffDay:idx===0,
+                      onClick:()=>moveRow(displayItems,item.id,-1,grouped)},"▲"),
                     h("button",{className:"btn btn-cancel",style:{padding:"0 5px",fontSize:10,lineHeight:1.4},
-                      disabled:idx===pi.length-1, onClick:()=>moveRow(pi,item.id,1)},"▼")
+                      disabled:grouped?nextDiffDay:idx===displayItems.length-1,
+                      onClick:()=>moveRow(displayItems,item.id,1,grouped)},"▼")
                   )
                 ),
                 ...(singleAsm?[]:[h("td",{key:"asm"},item.assembly_number)]),
@@ -3055,8 +3087,9 @@ function App(){
                   ?h("span",{className:"cycle-badge"},fmtMins(item.cycle_time_min)):"—"),
                 h("td",null,h("input",{type:"text",value:item.notes||"",
                   onChange:e=>updateField(item,"notes",e.target.value)}))
-              )
-            ))
+              ));
+              return rows;
+            }).flat())
           )
         )
       );
