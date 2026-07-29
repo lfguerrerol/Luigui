@@ -308,12 +308,12 @@ def _status_eta(pdf, d, page, npages):
     eta = d["top_eta"]
     if eta is not None and len(eta):
         items = list(eta["Item"])[::-1]
-        days = list(eta["ETA (days)"])[::-1]
-        ax.barh(range(len(items)), days, color=RED, alpha=0.85, height=0.6)
+        weeks = list(eta["ETA (weeks)"])[::-1]
+        ax.barh(range(len(items)), weeks, color=RED, alpha=0.85, height=0.6)
         ax.set_yticks(range(len(items)))
         ax.set_yticklabels([_truncate(i, 30) for i in items], fontsize=8.5,
                            color=NAVY)
-        ax.set_xlabel("Delivery lead time (days)", color=SLATE, fontsize=10)
+        ax.set_xlabel("Delivery lead time (weeks)", color=SLATE, fontsize=10)
         ax.set_title("Top 10 Longest Delivery Times (ETA)", color=NAVY,
                      fontsize=13, fontweight="bold", loc="left")
         for spine in ["top", "right"]:
@@ -321,8 +321,8 @@ def _status_eta(pdf, d, page, npages):
         ax.tick_params(colors=SLATE, labelsize=8)
         ax.grid(axis="x", color=BORDER, linewidth=0.7)
         ax.set_axisbelow(True)
-        for i, v in enumerate(days):
-            ax.text(v, i, f" {v:.0f}", va="center", fontsize=8, color=NAVY,
+        for i, v in enumerate(weeks):
+            ax.text(v, i, f" {v:g}", va="center", fontsize=8, color=NAVY,
                     fontweight="bold")
     else:
         ax.axis("off")

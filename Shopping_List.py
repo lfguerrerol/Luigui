@@ -305,13 +305,15 @@ def find_col(df, name):
 
 
 # =============================
-# ETA HELPERS  (delivery lead time)
+# ETA HELPERS  (delivery lead time, expressed in weeks)
 # =============================
-def eta_days(df):
-    """Return a numeric Series (days of delivery lead time) aligned to df.index.
+def eta_weeks(df):
+    """Return delivery lead time in WEEKS, aligned to df.index.
 
-    Accepts either a numeric lead time or a delivery date; dates are
-    converted to remaining days from today. Missing/invalid -> NaN.
+    Handles the ETA column whether it is a plain number (days), a delivery
+    date, or an Excel duration — always yielding sensible weeks instead of
+    the nanosecond blow-up you get from feeding datetimes to to_numeric.
+    Missing/invalid -> NaN.
     """
     if df.empty:
         return pd.Series(dtype=float)
@@ -320,37 +322,42 @@ def eta_days(df):
     if col is None:
         return pd.Series([float("nan")] * len(df), index=df.index)
 
-    raw = df[col].replace("", pd.NA)
+    s = df[col].replace("", pd.NA)
 
-    # Prefer plain numeric lead times.
-    num = pd.to_numeric(raw, errors="coerce")
+    if pd.api.types.is_timedelta64_dtype(s):
+        # An actual duration -> days
+        days = s.dt.total_seconds() / 86400.0
+    elif pd.api.types.is_datetime64_any_dtype(s):
+        # A delivery date -> remaining days from today
+        days = (s - pd.Timestamp.today().normalize()).dt.days
+    else:
+        # Object/text column: plain numbers are lead-time days; anything
+        # that is really a date gets converted from its date value.
+        days = pd.to_numeric(s, errors="coerce")
+        missing = days.isna() & s.notna()
+        if missing.any():
+            dates = pd.to_datetime(s[missing], errors="coerce")
+            days.loc[missing] = (dates - pd.Timestamp.today().normalize()).dt.days
 
-    # For anything not numeric, try to read it as a delivery date and
-    # convert to remaining days from today.
-    missing = num.isna() & raw.notna()
-    if missing.any():
-        dates = pd.to_datetime(raw[missing], errors="coerce")
-        day_from_date = (dates - pd.Timestamp.today().normalize()).dt.days
-        num.loc[missing] = day_from_date
-
-    return pd.to_numeric(num, errors="coerce")
+    days = pd.to_numeric(days, errors="coerce")
+    return (days / 7.0).round(1)
 
 
 def collect_eta(data):
-    """Build a DataFrame of every item with a valid ETA (delivery lead time)."""
+    """Build a DataFrame of every item with a valid ETA (in weeks)."""
     rows = []
     for label, df in data.items():
         if df.empty:
             continue
-        days = eta_days(df)
+        weeks = eta_weeks(df)
         desc_col = find_col(df, "Description")
         for idx in df.index:
-            d = days.get(idx, float("nan"))
-            if pd.notna(d):
+            w = weeks.get(idx, float("nan"))
+            if pd.notna(w):
                 rows.append({
                     "Item": str(df.loc[idx, desc_col]) if desc_col else str(idx),
                     "Category": label,
-                    "ETA (days)": float(d),
+                    "ETA (weeks)": float(w),
                 })
     return pd.DataFrame(rows)
 
@@ -472,7 +479,7 @@ for df in data.values():
 # PRE-COMPUTE RANKINGS (shared by dashboard + PDF)
 # =============================
 eta_all = collect_eta(data)
-top10_eta = (eta_all.sort_values("ETA (days)", ascending=False).head(10)
+top10_eta = (eta_all.sort_values("ETA (weeks)", ascending=False).head(10)
              if not eta_all.empty else eta_all)
 
 cost_all = collect_cost(data)
@@ -532,11 +539,11 @@ with col_right:
                 .encode(
                     y=alt.Y("Item:N", sort="-x", title=None,
                             axis=alt.Axis(labelColor=THEME["text"], labelLimit=180)),
-                    x=alt.X("ETA (days):Q", title="Delivery lead time (days)",
+                    x=alt.X("ETA (weeks):Q", title="Delivery lead time (weeks)",
                             axis=alt.Axis(labelColor=THEME["muted"])),
-                    color=alt.Color("ETA (days):Q", legend=None,
+                    color=alt.Color("ETA (weeks):Q", legend=None,
                                     scale=alt.Scale(scheme="orangered")),
-                    tooltip=["Item", "Category", "ETA (days)"],
+                    tooltip=["Item", "Category", "ETA (weeks)"],
                 )
                 .properties(height=300, background="transparent")
             )
