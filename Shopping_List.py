@@ -418,8 +418,33 @@ delta = total_all - budget
 
 st.subheader("💵 EXECUTIVE SUMMARY")
 
+# Seed classification (from template / prior edits) so TOTAL SPEND can be
+# split into Capex vs NRE right here.
+class_store = init_classification(data)
+apply_classification(data, class_store)
+
+
+def _fmt_compact(v):
+    v = float(v)
+    if abs(v) >= 1e6:
+        return f"${v / 1e6:.2f}M"
+    if abs(v) >= 1e3:
+        return f"${v / 1e3:.0f}K"
+    return f"${v:,.0f}"
+
+
+cap_kpi = nre_kpi = 0.0
+for _df in data.values():
+    if _df.empty:
+        continue
+    _cost = pd.to_numeric(_df["Total Cost USD"], errors="coerce").fillna(0)
+    _cls = _df[CLASS_COL].astype(str)
+    cap_kpi += float(_cost[_cls == "Capex"].sum())
+    nre_kpi += float(_cost[_cls == "NRE"].sum())
+
 kpi_cols = st.columns(len(CATEGORIES) + 1)
 kpi_cols[0].metric("TOTAL SPEND", f"${total_all:,.0f}")
+kpi_cols[0].caption(f"🏗️ Capex {_fmt_compact(cap_kpi)} · 🔧 NRE {_fmt_compact(nre_kpi)}")
 for i, (label, _, _) in enumerate(CATEGORIES, start=1):
     kpi_cols[i].metric(label, f"${totals[label]:,.0f}")
 
@@ -442,9 +467,6 @@ for df in data.values():
     s = status_summary(df)
     for k in status_totals:
         status_totals[k] += s[k]
-
-# Seed the Capex/NRE classification from the template (once per item).
-class_store = init_classification(data)
 
 # =============================
 # PRE-COMPUTE RANKINGS (shared by dashboard + PDF)
