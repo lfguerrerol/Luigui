@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 import altair as alt
 import pandas as pd
@@ -15,6 +17,34 @@ st.set_page_config(
 
 # Base directory of this script -> makes image/logo paths portable
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+
+# Purchase type classification
+CLASS_COL = "Capex/NRE"
+CLASS_OPTIONS = ["Capex", "NRE"]
+
+
+def open_path(path):
+    """Open a local folder in the OS file explorer.
+
+    Only works when the app runs on the same machine as the browser
+    (e.g. localhost). Returns (ok, message).
+    """
+    if not path:
+        return False, "Ruta vacía."
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return False, f"No existe la ruta: {path}"
+    folder = path if os.path.isdir(path) else os.path.dirname(path)
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(folder)  # noqa: S606 (Windows only)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", folder])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+        return True, f"Abriendo: {folder}"
+    except Exception as e:  # pragma: no cover
+        return False, f"No se pudo abrir la carpeta: {e}"
 
 # =============================
 # THEME / CONTRAST  (Fab Tracker style)
@@ -338,6 +368,45 @@ def collect_cost(data):
 
 
 # =============================
+# CAPEX / NRE CLASSIFICATION
+# =============================
+def _norm_class(v):
+    s = str(v).strip().lower()
+    if s in ("capex", "cap", "c"):
+        return "Capex"
+    if s in ("nre", "n"):
+        return "NRE"
+    if "cap" in s:
+        return "Capex"
+    if "nre" in s:
+        return "NRE"
+    return ""
+
+
+def init_classification(data):
+    """Seed the session store from a template column (if any), once per item."""
+    store = st.session_state.setdefault("capex_nre", {})
+    for label, df in data.items():
+        tcol = None
+        for cand in ("Capex/NRE", "Capex / NRE", "CAPEX/NRE", "Type", "Tipo"):
+            c = find_col(df, cand)
+            if c is not None:
+                tcol = c
+                break
+        for idx in df.index:
+            key = f"{label}#{idx}"
+            if key not in store:
+                store[key] = _norm_class(df.loc[idx, tcol]) if tcol is not None else ""
+    return store
+
+
+def apply_classification(data, store):
+    """Write the current classification back into each category DataFrame."""
+    for label, df in data.items():
+        df[CLASS_COL] = [store.get(f"{label}#{idx}", "") for idx in df.index]
+
+
+# =============================
 # KPI
 # =============================
 totals = {label: (df["Total Cost USD"].sum() if "Total Cost USD" in df.columns else 0.0)
@@ -374,6 +443,9 @@ for df in data.values():
     for k in status_totals:
         status_totals[k] += s[k]
 
+# Seed the Capex/NRE classification from the template (once per item).
+class_store = init_classification(data)
+
 # =============================
 # PRE-COMPUTE RANKINGS (shared by dashboard + PDF)
 # =============================
@@ -386,32 +458,10 @@ top10_cost = (cost_all.sort_values("Total Cost USD", ascending=False).head(10)
               if not cost_all.empty else cost_all)
 
 # =============================
-# EXPORT TO PDF (presentation-style, landscape)
+# EXPORT TO PDF (placeholder — filled at the end so it reflects live edits)
 # =============================
-exp_l, exp_r = st.columns([3, 1])
-with exp_r:
-    try:
-        pdf_bytes = build_report_pdf({
-            "totals": totals,
-            "total_all": total_all,
-            "budget": budget,
-            "delta": delta,
-            "status": status_totals,
-            "top_eta": top10_eta,
-            "top_cost": top10_cost,
-            "logo": logo_path,
-            "details": data,
-        })
-        st.download_button(
-            "⬇️ Exportar reporte PDF",
-            data=pdf_bytes,
-            file_name="Procurement_Report.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            help="Genera un reporte tipo presentación (horizontal) para dirección.",
-        )
-    except Exception as e:  # pragma: no cover - never break the dashboard
-        st.warning(f"No se pudo generar el PDF: {e}")
+_, exp_r = st.columns([3, 1])
+export_slot = exp_r.empty()
 
 # =============================
 # ROW: BUDGET (left)  ||  STATUS + ETA TOP-10 (right)
@@ -495,6 +545,122 @@ with st.expander("🔝 Top 10 Cost Items", expanded=True):
         st.dataframe(top10_cost, use_container_width=True)
 
 # =============================
+# CAPEX / NRE CLASSIFICATION (editable)
+# =============================
+with st.expander("🏷️ Capex vs NRE", expanded=True):
+    st.caption("Selecciona el tipo de compra por ítem. Se guarda durante la "
+               "sesión y se refleja en las tablas de detalle y en el PDF.")
+
+    labels = [c[0] for c in CATEGORIES]
+    cls_tabs = st.tabs(labels)
+    for tab, label in zip(cls_tabs, labels):
+        with tab:
+            df = data[label]
+            if df.empty:
+                st.info("Sin datos para esta categoría.")
+                continue
+
+            desc_col = find_col(df, "Description")
+            view = pd.DataFrame({
+                "Description": (df[desc_col].astype(str) if desc_col
+                                else df.index.astype(str)),
+                "Total Cost USD": pd.to_numeric(df["Total Cost USD"],
+                                                errors="coerce"),
+                CLASS_COL: [class_store.get(f"{label}#{idx}", "")
+                            for idx in df.index],
+            })
+            view.index = df.index
+
+            edited = st.data_editor(
+                view,
+                key=f"cls_editor_{label}",
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Description": st.column_config.TextColumn(
+                        "Description", disabled=True),
+                    "Total Cost USD": st.column_config.NumberColumn(
+                        "Total Cost USD", format="$%.0f", disabled=True),
+                    CLASS_COL: st.column_config.SelectboxColumn(
+                        "Capex / NRE", options=CLASS_OPTIONS, required=False,
+                        help="Capex = inversión de capital · NRE = non-recurring"),
+                },
+            )
+            for idx, val in zip(edited.index, edited[CLASS_COL]):
+                class_store[f"{label}#{idx}"] = "" if val is None else str(val)
+
+    # write selections back into the working data
+    apply_classification(data, class_store)
+
+    # ---- Capex vs NRE summary ----
+    cap_total = nre_total = unclassified = 0.0
+    cap_n = nre_n = 0
+    for df in data.values():
+        if df.empty:
+            continue
+        cost = pd.to_numeric(df["Total Cost USD"], errors="coerce").fillna(0)
+        cls = df[CLASS_COL].astype(str)
+        cap_total += float(cost[cls == "Capex"].sum())
+        nre_total += float(cost[cls == "NRE"].sum())
+        unclassified += float(cost[~cls.isin(CLASS_OPTIONS)].sum())
+        cap_n += int((cls == "Capex").sum())
+        nre_n += int((cls == "NRE").sum())
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🏗️ CAPEX", f"${cap_total:,.0f}", f"{cap_n} ítems")
+    m2.metric("🔧 NRE", f"${nre_total:,.0f}", f"{nre_n} ítems")
+    m3.metric("❔ Sin clasificar", f"${unclassified:,.0f}")
+
+    if cap_total + nre_total > 0:
+        cap_df = pd.DataFrame({
+            "Tipo": ["Capex", "NRE"],
+            "USD": [cap_total, nre_total],
+        })
+        cap_chart = (
+            alt.Chart(cap_df)
+            .mark_bar(cornerRadiusEnd=6)
+            .encode(
+                x=alt.X("USD:Q", title="USD", axis=alt.Axis(labelColor=THEME["muted"])),
+                y=alt.Y("Tipo:N", title=None, axis=alt.Axis(labelColor=THEME["text"])),
+                color=alt.Color("Tipo:N", legend=None,
+                                scale=alt.Scale(domain=["Capex", "NRE"],
+                                                range=["#2563eb", "#f59e0b"])),
+                tooltip=["Tipo", alt.Tooltip("USD:Q", format="$,.0f")],
+            )
+            .properties(height=140, background="transparent")
+        )
+        st.altair_chart(cap_chart, use_container_width=True)
+
+# =============================
+# ARCHIVOS Y RUTAS (abrir carpetas locales)
+# =============================
+with st.expander("🗂️ Rutas y archivos (abrir carpetas)", expanded=False):
+    st.caption("Abre carpetas en el explorador de tu equipo. Solo funciona "
+               "cuando ejecutas la app localmente (localhost).")
+
+    base_dir = st.text_input("Carpeta base del proyecto", value=BASE_PATH,
+                             key="base_dir_input")
+
+    rc1, rc2 = st.columns(2)
+    with rc1:
+        if st.button("📂 Abrir carpeta de imágenes", use_container_width=True):
+            ok, msg = open_path(os.path.join(base_dir, "images"))
+            (st.success if ok else st.warning)(msg)
+    with rc2:
+        if st.button("📂 Abrir carpeta base", use_container_width=True):
+            ok, msg = open_path(base_dir)
+            (st.success if ok else st.warning)(msg)
+
+    excel_dir = st.text_input(
+        "Ruta del Excel (Shopping List) — carpeta o archivo .xlsx",
+        value="", key="excel_dir_input",
+        placeholder=r"Ej. C:\Users\tuusuario\...\FLEX Shopping List\Shopping list.xlsx",
+    )
+    if st.button("📂 Abrir carpeta del Excel", use_container_width=True):
+        ok, msg = open_path(excel_dir or base_dir)
+        (st.success if ok else st.warning)(msg)
+
+# =============================
 # STATUS COLORING FOR TABLES
 # =============================
 def style_status(df):
@@ -554,12 +720,17 @@ with st.expander("📋 Detailed Tables", expanded=False):
             with c_img:
                 item_col = find_col(df, "ITEM") or find_col(df, "Item")
                 item_id = str(row.get(item_col, idx)).replace(".0", "").strip() if item_col else str(idx)
-                image_path = os.path.join(BASE_PATH, "images", folder, f"{item_id}.jpg")
+                folder_path = os.path.join(BASE_PATH, "images", folder)
+                image_path = os.path.join(folder_path, f"{item_id}.jpg")
                 st.caption(image_path)
                 if os.path.exists(image_path):
                     st.image(Image.open(image_path), use_container_width=True)
                 else:
                     st.warning(f"Image not found: {item_id}.jpg")
+                if st.button("📂 Abrir carpeta de imágenes",
+                             key=f"openimg_{title}", use_container_width=True):
+                    ok, msg = open_path(folder_path)
+                    (st.success if ok else st.warning)(msg)
 
             with c_info:
                 current_pos = list(df.index).index(idx)
@@ -588,3 +759,29 @@ with st.expander("📋 Detailed Tables", expanded=False):
     for tab, label in zip(tabs, labels):
         with tab:
             show_table(data[label], label, folders[label])
+
+# =============================
+# BUILD PDF (now that classification is applied) -> fill the top button
+# =============================
+try:
+    pdf_bytes = build_report_pdf({
+        "totals": totals,
+        "total_all": total_all,
+        "budget": budget,
+        "delta": delta,
+        "status": status_totals,
+        "top_eta": top10_eta,
+        "top_cost": top10_cost,
+        "logo": logo_path,
+        "details": data,
+    })
+    export_slot.download_button(
+        "⬇️ Exportar reporte PDF",
+        data=pdf_bytes,
+        file_name="Procurement_Report.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+        help="Genera un reporte tipo presentación (horizontal) para dirección.",
+    )
+except Exception as e:  # pragma: no cover - never break the dashboard
+    export_slot.warning(f"No se pudo generar el PDF: {e}")

@@ -35,10 +35,11 @@ ROWS_PER_PAGE = 15  # detail table rows before spilling to a new slide
 # Columns shown in the detail tables (label, relative width)
 DETAIL_COLS = [
     ("ITEM", 0.05),
-    ("Description", 0.33),
-    ("Supplier", 0.16),
-    ("Qty", 0.07),
-    ("Total Cost USD", 0.14),
+    ("Description", 0.30),
+    ("Supplier", 0.15),
+    ("Qty", 0.06),
+    ("Total Cost USD", 0.13),
+    ("Capex/NRE", 0.10),
     ("Status", 0.13),
     ("ETA", 0.08),
 ]
@@ -298,7 +299,7 @@ def _detail_value(name, value):
         return _truncate(value, 44)
     if name == "Supplier":
         return _truncate(value, 20)
-    if name == "Status":
+    if name in ("Status", "Capex/NRE"):
         s = str(value).strip()
         return s if s else "—"
     return _truncate(value, 16)
