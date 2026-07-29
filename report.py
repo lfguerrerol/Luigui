@@ -204,6 +204,91 @@ def _summary(pdf, d, page, npages):
     plt.close(fig)
 
 
+def _capex_nre(pdf, d, page, npages):
+    info = d["capex"]
+    cap = float(info.get("cap_total", 0))
+    nre = float(info.get("nre_total", 0))
+    unc = float(info.get("unclassified", 0))
+    classified = cap + nre
+    cap_pct = (cap / classified * 100) if classified else 0
+    nre_pct = (nre / classified * 100) if classified else 0
+
+    fig = _new_slide()
+    _title(fig, "Capex vs NRE")
+
+    _tiles(
+        fig,
+        [0.04, 0.66, 0.92, 0.17],
+        [
+            ("CAPEX", f"${cap:,.0f}   ·   {cap_pct:.0f}%", BLUE),
+            ("NRE", f"${nre:,.0f}   ·   {nre_pct:.0f}%", AMBER),
+            ("TOTAL CLASSIFIED", f"${classified:,.0f}", INDIGO),
+            ("UNCLASSIFIED", f"${unc:,.0f}", SLATE),
+        ],
+    )
+
+    # ---- Donut (left) ----
+    axd = fig.add_axes([0.06, 0.1, 0.32, 0.46])
+    if classified > 0:
+        axd.pie(
+            [cap, nre],
+            colors=[BLUE, AMBER],
+            startangle=90,
+            counterclock=False,
+            wedgeprops=dict(width=0.42, edgecolor=WHITE, linewidth=2),
+        )
+        axd.text(0, 0.12, f"${classified:,.0f}", ha="center", va="center",
+                 fontsize=15, fontweight="bold", color=NAVY)
+        axd.text(0, -0.14, "Classified", ha="center", va="center",
+                 fontsize=10, color=SLATE)
+    else:
+        axd.axis("off")
+        axd.text(0.5, 0.5, "Sin clasificar", ha="center", va="center",
+                 color=SLATE, fontsize=12)
+    axd.set_aspect("equal")
+    axd.set_title("Split of classified spend", color=NAVY, fontsize=12,
+                  fontweight="bold")
+
+    # legend
+    axl = fig.add_axes([0.06, 0.05, 0.32, 0.05])
+    axl.axis("off")
+    axl.add_patch(Rectangle((0.06, 0.3), 0.03, 0.4, color=BLUE))
+    axl.text(0.11, 0.5, "Capex", va="center", fontsize=10, color=NAVY)
+    axl.add_patch(Rectangle((0.35, 0.3), 0.03, 0.4, color=AMBER))
+    axl.text(0.40, 0.5, "NRE", va="center", fontsize=10, color=NAVY)
+
+    # ---- By-category stacked bars (right) ----
+    by_cat = [c for c in info.get("by_category", []) if (c[1] + c[2]) > 0]
+    axb = fig.add_axes([0.47, 0.12, 0.48, 0.44])
+    if by_cat:
+        labels = [c[0] for c in by_cat][::-1]
+        caps = [c[1] for c in by_cat][::-1]
+        nres = [c[2] for c in by_cat][::-1]
+        y = range(len(labels))
+        axb.barh(y, caps, color=BLUE, height=0.6, label="Capex")
+        axb.barh(y, nres, left=caps, color=AMBER, height=0.6, label="NRE")
+        axb.set_yticks(list(y))
+        axb.set_yticklabels([_truncate(l, 20) for l in labels], fontsize=9,
+                            color=NAVY)
+        axb.set_xlabel("USD", color=SLATE, fontsize=10)
+        axb.set_title("Capex / NRE by category", color=NAVY, fontsize=12,
+                      fontweight="bold", loc="left")
+        for spine in ["top", "right"]:
+            axb.spines[spine].set_visible(False)
+        axb.tick_params(colors=SLATE, labelsize=8)
+        axb.grid(axis="x", color=BORDER, linewidth=0.7)
+        axb.set_axisbelow(True)
+    else:
+        axb.axis("off")
+        axb.text(0.5, 0.5, "Clasifica los ítems en el dashboard\n"
+                           "para ver el desglose por categoría.",
+                 ha="center", va="center", color=SLATE, fontsize=11)
+
+    _footer(fig, page, npages)
+    pdf.savefig(fig, facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+
 def _status_eta(pdf, d, page, npages):
     fig = _new_slide()
     _title(fig, "Procurement Status & Delivery Times")
@@ -352,6 +437,8 @@ def _category_slides(pdf, title, df, page, npages):
 # ---------------------------------------------------------------------------
 def _count_pages(d):
     n = 4  # cover, summary, status+eta, top costs
+    if d.get("capex"):
+        n += 1
     for df in d.get("details", {}).values():
         if df is not None and not df.empty:
             n += max(1, math.ceil(len(df) / ROWS_PER_PAGE))
@@ -373,6 +460,8 @@ def build_report_pdf(d):
     with PdfPages(buf) as pdf:
         _cover(pdf, d, page, npages); page += 1
         _summary(pdf, d, page, npages); page += 1
+        if d.get("capex"):
+            _capex_nre(pdf, d, page, npages); page += 1
         _status_eta(pdf, d, page, npages); page += 1
         _top_costs(pdf, d, page, npages); page += 1
         for label, df in d.get("details", {}).items():

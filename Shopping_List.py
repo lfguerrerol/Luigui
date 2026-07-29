@@ -763,6 +763,30 @@ with st.expander("📋 Detailed Tables", expanded=False):
 # =============================
 # BUILD PDF (now that classification is applied) -> fill the top button
 # =============================
+def compute_capex(data):
+    cap = nre = unc = 0.0
+    cap_n = nre_n = unc_n = 0
+    by_category = []
+    for label, df in data.items():
+        if df.empty or CLASS_COL not in df.columns:
+            continue
+        cost = pd.to_numeric(df["Total Cost USD"], errors="coerce").fillna(0)
+        cls = df[CLASS_COL].astype(str)
+        c = float(cost[cls == "Capex"].sum())
+        n = float(cost[cls == "NRE"].sum())
+        u = float(cost[~cls.isin(CLASS_OPTIONS)].sum())
+        cap += c; nre += n; unc += u
+        cap_n += int((cls == "Capex").sum())
+        nre_n += int((cls == "NRE").sum())
+        unc_n += int((~cls.isin(CLASS_OPTIONS)).sum())
+        by_category.append((label, c, n))
+    return {
+        "cap_total": cap, "nre_total": nre, "unclassified": unc,
+        "cap_n": cap_n, "nre_n": nre_n, "unclassified_n": unc_n,
+        "by_category": by_category,
+    }
+
+
 try:
     pdf_bytes = build_report_pdf({
         "totals": totals,
@@ -774,6 +798,7 @@ try:
         "top_cost": top10_cost,
         "logo": logo_path,
         "details": data,
+        "capex": compute_capex(data),
     })
     export_slot.download_button(
         "⬇️ Exportar reporte PDF",
