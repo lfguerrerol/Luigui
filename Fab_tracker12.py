@@ -128,9 +128,9 @@ def init_data():
          "qty_ordered": 5, "active": True},
     ]
     tracker_db["parts"] = [
-        {"id": 1, "part_number": "M1320502-001", "description": "Bracket A", "active": True},
-        {"id": 2, "part_number": "M1320509-001", "description": "Bracket B", "active": True},
-        {"id": 3, "part_number": "M1320515-001", "description": "Bracket C", "active": True},
+        {"id": 1, "part_number": "M1320502-001", "description": "Bracket A", "image": None, "active": True},
+        {"id": 2, "part_number": "M1320509-001", "description": "Bracket B", "image": None, "active": True},
+        {"id": 3, "part_number": "M1320515-001", "description": "Bracket C", "image": None, "active": True},
     ]
     tracker_db["assembly_parts"] = [
         # Bracket A se reutiliza en los DOS ensambles — ejemplo de parte común.
@@ -193,7 +193,7 @@ def migrate_flat_to_relational():
                    "description": it.get("description", ""),
                    "qty_ordered": it.get("qty_ordered", 0), "active": True}
             part = {"id": len(parts) + 1, "part_number": pn,
-                    "description": it.get("description", ""), "active": True}
+                    "description": it.get("description", ""), "image": None, "active": True}
             ap = {"id": len(assembly_parts) + 1, "assembly_id": asm["id"], "part_id": part["id"],
                   "qty_ordered": it.get("qty_ordered", 0), "active": True}
             asm_by_pn[pn] = (asm, part, ap)
@@ -236,7 +236,7 @@ def migrate_parts_to_assemblies(loaded_keys):
         part = part_by_pn.get(pn)
         if not part:
             part = {"id": len(parts) + 1, "part_number": pn,
-                    "description": asm.get("description", ""), "active": True}
+                    "description": asm.get("description", ""), "image": None, "active": True}
             part_by_pn[pn] = part
             parts.append(part)
         ap = {"id": len(assembly_parts) + 1, "assembly_id": asm["id"], "part_id": part["id"],
@@ -266,6 +266,8 @@ if loaded:
         it.setdefault("actual_end",     "")
         it.setdefault("cycle_time_min", None)
         it.setdefault("priority", it.get("id"))
+    for pt in loaded.get("parts", []):
+        pt.setdefault("image", None)
     tracker_db.update(loaded)
     # backfill "seq" for legacy records that predate this field
     by_part = {}
@@ -333,6 +335,9 @@ class AssemblyModel(BaseModel):
 class PartModel(BaseModel):
     part_number:  str
     description:  Optional[str] = ""
+
+class PartImageModel(BaseModel):
+    image: Optional[str] = None   # base64 data URI (e.g. "data:image/jpeg;base64,...") or null to remove
 
 class AssemblyPartModel(BaseModel):
     part_id:      int
@@ -492,7 +497,7 @@ def _find_or_create_part(part_number, description):
                 p["description"] = description
             return p
     p = {"id": next_id(tracker_db["parts"]), "part_number": part_number,
-         "description": description or "", "active": True}
+         "description": description or "", "image": None, "active": True}
     tracker_db["parts"].append(p)
     return p
 
@@ -935,7 +940,7 @@ def create_part(data: PartModel):
     if any(p["part_number"].lower() == pn.lower() for p in tracker_db["parts"]):
         raise HTTPException(status_code=400, detail="Ya existe una parte con ese número")
     part = {"id": next_id(tracker_db["parts"]), "part_number": pn,
-            "description": data.description or "", "active": True}
+            "description": data.description or "", "image": None, "active": True}
     tracker_db["parts"].append(part)
     save_data()
     return part
@@ -950,6 +955,13 @@ def update_part(part_id: int, data: PartModel):
         raise HTTPException(status_code=400, detail="Ya existe una parte con ese número")
     part.update({"part_number": pn, "description": data.description or ""})
     sync_part_to_items(part)
+    save_data()
+    return part
+
+@app.put("/api/parts/{part_id}/image")
+def update_part_image(part_id: int, data: PartImageModel):
+    part = find_or_404(tracker_db["parts"], part_id, "Parte")
+    part["image"] = data.image
     save_data()
     return part
 
@@ -2111,6 +2123,10 @@ canvas{max-height:220px;}
 .step-chip .x:hover{opacity:1;}
 .expand-toggle{cursor:pointer;color:#4fc3f7;}
 .bom-card{border:1px solid #1a2d4a;border-radius:8px;padding:8px;}
+.part-thumb{width:32px;height:32px;object-fit:cover;border-radius:5px;
+            border:1px solid #1f3864;cursor:pointer;flex-shrink:0;}
+.part-thumb-empty{display:flex;align-items:center;justify-content:center;
+                  background:#0a1828;color:#334d66;font-size:14px;}
 
 /* ── RESPONSIVE ── */
 @media(max-width:600px){
@@ -2223,6 +2239,29 @@ function Modal({title,message,warn,onConfirm,onCancel,needNote}){
    CATALOG CRUD — shared helpers
 ════════════════════════════════════════ */
 const JSONH = {"Content-Type":"application/json"};
+
+/* shrink an uploaded image client-side before it goes into tracker_data.json */
+function fileToThumbDataURL(file, maxSize){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=reject;
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=reject;
+      img.onload=()=>{
+        const scale=Math.min(1, maxSize/Math.max(img.width,img.height));
+        const w=Math.max(1,Math.round(img.width*scale));
+        const h=Math.max(1,Math.round(img.height*scale));
+        const canvas=document.createElement("canvas");
+        canvas.width=w; canvas.height=h;
+        canvas.getContext("2d").drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL("image/jpeg",0.8));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 function requestDelete(endpoint, id, label, name, setModal, onDone){
   fetch(`${endpoint}/${id}`,{method:"DELETE"}).then(r=>{
@@ -2633,11 +2672,27 @@ function PartsAdmin({parts,assemblyParts,assemblies,reload,setModal}){
   };
   const del = p=>requestDelete("/api/parts", p.id, "Parte", p.part_number, setModal, reload);
 
+  const fileInputs = useRef({});
+  const pickImage = pid => fileInputs.current[pid] && fileInputs.current[pid].click();
+  const onImageChosen = (pid,e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if(!file) return;
+    fileToThumbDataURL(file, 200).then(dataUrl=>
+      fetch(`/api/parts/${pid}/image`,{method:"PUT",headers:JSONH,body:JSON.stringify({image:dataUrl})})
+        .then(r=>{ if(!r.ok) r.json().then(e=>alert("⚠ "+e.detail)); else reload(); })
+    );
+  };
+  const removeImage = pid =>
+    fetch(`/api/parts/${pid}/image`,{method:"PUT",headers:JSONH,body:JSON.stringify({image:null})})
+      .then(r=>{ if(!r.ok) r.json().then(e=>alert("⚠ "+e.detail)); else reload(); });
+
   return h("div",{className:"admin-section"},
     h("h3",null,"🔩 Catálogo de Partes (reutilizables entre ensambles)"),
     h("p",{style:{color:"#6a88a8",fontSize:11,marginTop:-4,marginBottom:10}},
       "Estas partes son globales: la misma parte puede asignarse a varios ensambles o proyectos "
-      +"distintos y su avance se sigue por separado en cada uno."),
+      +"distintos y su avance se sigue por separado en cada uno. La miniatura que subas aquí "
+      +"también se muestra junto a la parte en la pestaña Procesos."),
     h("div",{className:"admin-form"},
       h("input",{placeholder:"Número de Parte",value:form.part_number,
         onChange:e=>setForm({...form,part_number:e.target.value})}),
@@ -2646,11 +2701,23 @@ function PartsAdmin({parts,assemblyParts,assemblies,reload,setModal}){
       h("button",{className:"btn btn-bulk",onClick:submit},"+ Nueva Parte")
     ),
     h("div",{className:"tbl-wrap"},h("table",null,
-      h("thead",null,h("tr",null,["Parte","Descripción","Usada en",""].map(cl=>h("th",{key:cl},cl)))),
+      h("thead",null,h("tr",null,["Img","Parte","Descripción","Usada en",""].map(cl=>h("th",{key:cl},cl)))),
       h("tbody",null,parts.map(p=>{
         const used = usageAssemblies(p.id);
+        const imgCell = h("td",null,
+          h("input",{type:"file",accept:"image/*",style:{display:"none"},
+            ref:el=>fileInputs.current[p.id]=el, onChange:e=>onImageChosen(p.id,e)}),
+          h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+            p.image
+              ? h("img",{src:p.image,className:"part-thumb",onClick:()=>pickImage(p.id)})
+              : h("div",{className:"part-thumb part-thumb-empty",onClick:()=>pickImage(p.id)},"📷"),
+            p.image && h("span",{className:"x",style:{cursor:"pointer",fontSize:11,color:"#8ba0b8"},
+              onClick:()=>removeImage(p.id)},"✕")
+          )
+        );
         return editingId===p.id
           ? h("tr",{key:p.id},
+              imgCell,
               h("td",null,h("input",{value:editForm.part_number,
                 onChange:e=>setEditForm({...editForm,part_number:e.target.value})})),
               h("td",null,h("input",{value:editForm.description,
@@ -2660,6 +2727,7 @@ function PartsAdmin({parts,assemblyParts,assemblies,reload,setModal}){
                 h("button",{className:"btn btn-bulk",onClick:saveEdit},"Guardar"),
                 h("button",{className:"btn btn-cancel",onClick:()=>setEditingId(null)},"Cancelar")))
           : h("tr",{key:p.id},
+              imgCell,
               h("td",null,p.part_number), h("td",null,p.description||"—"),
               h("td",null,used.length ? `${used.length} ensamble(s): ${used.join(", ")}` : "—"),
               h("td",null,
@@ -2869,6 +2937,8 @@ function App(){
 
   const displayProcs = procOrder || data.processes;
   const alertSet=new Set(alerts.map(a=>a.process));
+  const partImgById={};
+  data.parts.forEach(p=>{ if(p.image) partImgById[p.id]=p.image; });
 
   /* ── filtering ── */
   const filteredItems = data.items.filter(i=>{
@@ -2968,7 +3038,7 @@ function App(){
       // their own day's block once grouping is on)
       const grouped=!!groupByDate[p];
       const displayItems=grouped ? [...pi].sort((a,b)=>dateOf(a).localeCompare(dateOf(b))) : pi;
-      const colCount=(singleAsm?12:13);
+      const colCount=(singleAsm?13:14);
 
       return h("div",{
         key:p, className:"proc-section",
@@ -3024,6 +3094,7 @@ function App(){
             h("thead",null,h("tr",null,
               h("th",{className:"cb-cell"},""),
               h("th",null,"Ord."),
+              h("th",null,"Img"),
               ...(singleAsm?[]:["Ensamble"]).concat(
                 ["Part","Descripción","Estado","Qty","Ini.Plan","Fin Plan",
                  "Ini.Real","Fin Real","T.Ciclo","Notas"]
@@ -3059,6 +3130,11 @@ function App(){
                       disabled:grouped?nextDiffDay:idx===displayItems.length-1,
                       onClick:()=>moveRow(displayItems,item.id,1,grouped)},"▼")
                   )
+                ),
+                /* part thumbnail, if the catalog part has one */
+                h("td",null, partImgById[item.part_id]
+                  ? h("img",{src:partImgById[item.part_id],className:"part-thumb",style:{cursor:"default"}})
+                  : h("div",{className:"part-thumb part-thumb-empty",style:{cursor:"default"}},"—")
                 ),
                 ...(singleAsm?[]:[h("td",{key:"asm"},item.assembly_number)]),
                 h("td",null,item.part_number),
