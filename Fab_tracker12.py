@@ -6,6 +6,7 @@ import pandas as pd
 import uvicorn
 import json
 import os
+import io
 from datetime import datetime
 
 # PDF / Excel exports
@@ -520,11 +521,76 @@ def _find_or_create_process(name):
 
 @app.post("/upload")
 def upload(file: UploadFile = File(...)):
-    df = pd.read_excel(file.file)
+    try:
+        content = file.file.read()
+        raw = pd.read_excel(io.BytesIO(content), header=None)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el archivo Excel: {exc}")
+
+    # the exported /export/template file has a title + instructions row before
+    # the real header row, so find whichever row actually has "Assembly_Number"
+    # instead of always assuming row 1 — works for that template and for a
+    # plain sheet with headers already on row 1.
+    header_row_idx = None
+    for i in range(min(10, len(raw))):
+        if raw.iloc[i].astype(str).str.strip().eq("Assembly_Number").any():
+            header_row_idx = i
+            break
+    if header_row_idx is None:
+        raise HTTPException(status_code=400,
+            detail="No se encontró la fila de encabezados (debe incluir 'Assembly_Number') "
+                   "en las primeras filas del archivo.")
+
+    try:
+        df = pd.read_excel(io.BytesIO(content), header=header_row_idx)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer el archivo Excel: {exc}")
+
+    required_cols = ["Assembly_Number", "Part_Number", "Process", "Sequence", "Qty"]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise HTTPException(status_code=400,
+            detail="Faltan columnas obligatorias en el Excel: " + ", ".join(missing_cols))
+
+    # drop leftover blank template rows (Assembly_Number/Part_Number/Process empty)
+    df = df.dropna(subset=["Assembly_Number", "Part_Number", "Process"], how="any")
+    if df.empty:
+        raise HTTPException(status_code=400,
+            detail="El archivo no tiene filas con datos (Assembly_Number, Part_Number y Process vacíos en todas las filas).")
+
+    # ── validate every row BEFORE touching any existing data, so a bad file
+    #    never leaves the app with partially-cleared/partially-loaded data ──
+    for idx, row in df.iterrows():
+        excel_row = idx + 2  # +2: Excel header is row 1, pandas index is 0-based
+        pn = row.get("Part_Number")
+        if pd.isna(row.get("Qty")):
+            raise HTTPException(status_code=400,
+                detail=f"Fila {excel_row}: falta la cantidad (Qty) para la parte '{pn}'.")
+        try:
+            int(row["Qty"])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400,
+                detail=f"Fila {excel_row}: la cantidad (Qty) '{row['Qty']}' no es un número válido para la parte '{pn}'.")
+        if pd.isna(row.get("Sequence")):
+            raise HTTPException(status_code=400,
+                detail=f"Fila {excel_row}: falta la secuencia (Sequence) para la parte '{pn}'.")
+        try:
+            int(row["Sequence"])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400,
+                detail=f"Fila {excel_row}: la secuencia (Sequence) '{row['Sequence']}' no es un número válido para la parte '{pn}'.")
+        if "Assembly_Qty" in df.columns and pd.notna(row.get("Assembly_Qty")):
+            try:
+                int(row["Assembly_Qty"])
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400,
+                    detail=f"Fila {excel_row}: la cantidad del ensamble (Assembly_Qty) '{row['Assembly_Qty']}' no es un número válido.")
+
     tracker_db["items"].clear()
     tracker_db["assembly_parts"].clear()
     tracker_db["assemblies"].clear()
     idc = 1
+    touched_assemblies, touched_parts, n_steps = set(), set(), 0
     for (asm_num, part_num), group in df.groupby(["Assembly_Number", "Part_Number"]):
         group = group.sort_values("Sequence")
         first = group.iloc[0]
@@ -537,6 +603,8 @@ def upload(file: UploadFile = File(...)):
         )
         part = _find_or_create_part(str(part_num), str(first.get("Description", "")))
         ap   = _find_or_create_assembly_part(assembly["id"], part["id"], int(first["Qty"]))
+        touched_assemblies.add(assembly["id"])
+        touched_parts.add(part["id"])
         for seq, (_, row) in enumerate(group.iterrows(), 1):
             proc = _find_or_create_process(str(row["Process"]))
             tracker_db["items"].append({
@@ -556,8 +624,9 @@ def upload(file: UploadFile = File(...)):
                 "cycle_time_min": None,
             })
             idc += 1
+            n_steps += 1
     save_data()
-    return {"ok": True}
+    return {"ok": True, "assemblies": len(touched_assemblies), "parts": len(touched_parts), "steps": n_steps}
 
 # ─────────────────────────────────────────────
 # DATA API
@@ -2818,6 +2887,7 @@ function App(){
   // drag-and-drop reorder
   const [procOrder,setProcOrder]=useState(null);  // null = use data.processes
   const dragSrc=useRef(null);
+  const fileInputRef=useRef(null);
   // filters
   const [filters,setFilters]=useState({client_id:"",project_id:"",assembly_id:"",part_id:"",process_id:"",search:""});
 
@@ -2834,7 +2904,17 @@ function App(){
   const upload=()=>{
     if(!file) return;
     const f=new FormData(); f.append("file",file);
-    fetch("/upload",{method:"POST",body:f}).then(()=>{setProcOrder(null);load();});
+    fetch("/upload",{method:"POST",body:f})
+      .then(r=>r.json().then(res=>({ok:r.ok,res})))
+      .then(({ok,res})=>{
+        if(!ok){ alert("⚠ No se pudo cargar el archivo:\n"+(res.detail||"Error desconocido")); return; }
+        setFile(null);
+        if(fileInputRef.current) fileInputRef.current.value="";
+        setProcOrder(null);
+        load();
+        alert(`✅ Archivo cargado con éxito: ${res.assemblies} ensamble(s), ${res.parts} parte(s), ${res.steps} paso(s) de proceso.`);
+      })
+      .catch(()=>alert("⚠ No se pudo conectar con el servidor para subir el archivo."));
   };
 
   /* ── single field update with reopen-note intercept ── */
@@ -2993,7 +3073,7 @@ function App(){
 
   /* toolbar */
   const toolbar=h("div",{className:"toolbar"},
-    h("input",{type:"file",className:"file-input",onChange:e=>setFile(e.target.files[0])}),
+    h("input",{type:"file",className:"file-input",ref:fileInputRef,onChange:e=>setFile(e.target.files[0])}),
     h("button",{className:"btn btn-upload",onClick:upload},"⬆ Upload Excel"),
     h("a",{className:"btn btn-excel",   href:"/export/excel",    target:"_blank"},"📊 Excel"),
     h("a",{className:"btn btn-pdf",     href:"/export/pdf",      target:"_blank"},"📄 PDF"),
